@@ -303,7 +303,7 @@ export default function MaintenancePage() {
                   <option value="">Select vehicle from master</option>
                   {availableVehicles.map(v => (
                     <option key={v.id || v.vehicle_no} value={v.vehicle_no}>
-                      {v.vehicle_no} ({v.type || 'Truck'})
+                      {v.vehicle_no} {((v as any).type || (v as any).model) ? `(${((v as any).type || (v as any).model)})` : ''}
                     </option>
                   ))}
                   <option value="__custom__">+ Enter custom vehicle...</option>

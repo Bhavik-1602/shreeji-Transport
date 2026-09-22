@@ -671,7 +671,7 @@ export default function NewTripPage() {
                 <option value="">Select vehicle from master</option>
                 {activeVehicles.map(v => (
                   <option key={v.id} value={v.vehicle_no}>
-                    {v.vehicle_no} ({v.type || 'Truck'})
+                    {v.vehicle_no} {((v as any).type || (v as any).model) ? `(${((v as any).type || (v as any).model)})` : ''}
                   </option>
                 ))}
                 <option value="__custom__">+ Enter custom vehicle...</option>

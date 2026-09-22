@@ -50,6 +50,7 @@ export interface Vehicle {
   transport_id: string;
   vehicle_no: string;
   model: string | null;
+  type?: string | null;
   owner_name: string | null;
   purchase_date: string | null;
   is_active: boolean;
