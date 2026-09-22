@@ -1,0 +1,136 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design system — see docs/DESIGN.md. Do not add new colors here. */
+:root {
+  --font-sans: "Inter", system-ui, sans-serif;
+  --sidebar-width: 256px;
+  --header-height: 60px;
+}
+
+/* ── Base ──────────────────────────────────────────────────────── */
+
+body {
+  @apply bg-paper text-ink;
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Focus rings — visible keyboard focus on every interactive element ── */
+
+*:focus-visible {
+  outline: 2px solid #0F6B4F;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ── Scrollbar for horizontal-scrolling tables ──────────────────── */
+
+.table-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+.table-scroll::-webkit-scrollbar-track {
+  background: #F1F4F3;
+  border-radius: 3px;
+}
+.table-scroll::-webkit-scrollbar-thumb {
+  background: #D3DCDA;
+  border-radius: 3px;
+}
+.table-scroll::-webkit-scrollbar-thumb:hover {
+  background: #5C6B70;
+}
+
+/* ── Reduced motion — no animation longer than 200ms ────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── Form inputs ─────────────────────────────────────────────────── */
+
+@layer base {
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input[type="date"],
+  input[type="tel"],
+  input:not([type]),
+  textarea,
+  select {
+    @apply w-full rounded-lg border border-line bg-panel px-3 py-2 text-[14px] text-ink placeholder:text-muted/60;
+    transition: border-color 150ms ease;
+  }
+
+  input:focus,
+  textarea:focus,
+  select:focus {
+    @apply border-primary ring-1 ring-primary/20;
+    outline: none;
+  }
+
+  input:disabled,
+  textarea:disabled,
+  select:disabled {
+    @apply bg-paper text-muted cursor-not-allowed;
+  }
+}
+
+/* Explicit rule so search inputs with leading icons never overlap text */
+.search-input,
+input.pl-9,
+input[class*="pl-9"],
+input[class*="pl-10"],
+input[class*="pl-11"] {
+  padding-left: 2.6rem !important;
+}
+
+input.pr-10,
+input[class*="pr-10"] {
+  padding-right: 2.5rem !important;
+}
+
+/* Read-only computed field tint */
+.computed-field {
+  @apply bg-primary/5 border-primary/20 text-primary font-medium;
+}
+
+/* ── Skeleton loading ────────────────────────────────────────────── */
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #D3DCDA 25%, #E8EDEB 50%, #D3DCDA 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 6px;
+}
+
+/* ── Sidebar transition ──────────────────────────────────────────── */
+
+.sidebar-enter {
+  transform: translateX(-100%);
+  transition: transform 200ms ease;
+}
+.sidebar-enter-active {
+  transform: translateX(0);
+}
+
+/* ── Print styles ────────────────────────────────────────────────── */
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}
