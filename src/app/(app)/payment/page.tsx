@@ -353,8 +353,9 @@ export default function PaymentPage() {
 
     // If still not matched, check if party name has a single pending trip
     if (!targetTrip && form.party_name) {
+      const partySearch = form.party_name.trim().toLowerCase();
       const partyTrips = trips.filter(t => 
-        t.party_name.trim().toLowerCase() === form.party_name.trim().toLowerCase() &&
+        (t.party_name || '').trim().toLowerCase() === partySearch &&
         (t.payment_status !== 'received' || (t.balance_amount ?? 0) > 0)
       );
       if (partyTrips.length === 1) {
