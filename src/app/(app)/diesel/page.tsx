@@ -59,8 +59,14 @@ export default function DieselPage() {
     };
 
     refreshData();
-    syncDieselFromSupabase().then(res => {
-      if (res && res.length > 0) setEntries([...res]);
+    syncDieselFromSupabase().then(() => {
+      const trips = getStoredTrips();
+      if (trips && trips.length > 0) {
+        const synced = syncDieselFromTrips(trips);
+        setEntries([...synced]);
+      } else {
+        setEntries(getStoredDiesel());
+      }
     });
     syncTripsFromSupabase().then(trips => {
       if (trips && trips.length > 0) {

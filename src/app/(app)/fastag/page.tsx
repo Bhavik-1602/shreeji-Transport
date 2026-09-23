@@ -8,8 +8,9 @@ import Modal from '@/components/Modal';
 import SearchInput from '@/components/SearchInput';
 import { TextField, SelectField } from '@/components/Input';
 import { formatCurrency, formatDate } from '@/lib/format';
-import { getStoredFastag, saveFastag, deleteFastag, getNextFastagNo, syncFastagFromSupabase } from '@/lib/operations-store';
+import { getStoredFastag, saveFastag, deleteFastag, getNextFastagNo, syncFastagFromSupabase, syncFastagFromTrips } from '@/lib/operations-store';
 import { getVehicles, syncVehiclesFromSupabase } from '@/lib/master-store';
+import { getStoredTrips, syncTripsFromSupabase } from '@/lib/trip-store';
 import { generateUUID } from '@/lib/supabase-service';
 import type { Fastag, PaymentMode, Vehicle } from '@/types/database';
 
@@ -43,13 +44,26 @@ export default function FastagPage() {
   const [modalError, setModalError] = useState<string | null>(null);
 
   useEffect(() => {
-    setRecords(getStoredFastag());
+    const refresh = () => {
+      const trips = getStoredTrips();
+      if (trips.length > 0) syncFastagFromTrips(trips);
+      setRecords(getStoredFastag());
+    };
+
+    refresh();
     const v = getVehicles();
     setAvailableVehicles(v || []);
 
-    syncFastagFromSupabase().then(remote => {
-      if (remote && remote.length > 0) {
-        setRecords(remote);
+    syncFastagFromSupabase().then(() => {
+      const trips = getStoredTrips();
+      if (trips.length > 0) syncFastagFromTrips(trips);
+      setRecords(getStoredFastag());
+    }).catch(() => {});
+
+    syncTripsFromSupabase().then(trips => {
+      if (trips && trips.length > 0) {
+        syncFastagFromTrips(trips);
+        setRecords(getStoredFastag());
       }
     }).catch(() => {});
 
@@ -58,11 +72,21 @@ export default function FastagPage() {
         setAvailableVehicles(remoteVehicles);
       }
     }).catch(() => {});
+
+    window.addEventListener('shreeji_operations_updated', refresh);
+    window.addEventListener('shreeji_trips_updated', refresh);
+    return () => {
+      window.removeEventListener('shreeji_operations_updated', refresh);
+      window.removeEventListener('shreeji_trips_updated', refresh);
+    };
   }, []);
 
   const filtered = useMemo(() => records.filter(r => {
-    if (search && !r.fastag_no.toLowerCase().includes(search.toLowerCase()) &&
-        !(r.vehicle_no ?? '').toLowerCase().includes(search.toLowerCase())) return false;
+    const q = search.trim().toLowerCase();
+    if (q) {
+      const hay = `${r.fastag_no || ''} ${r.vehicle_no || ''} ${r.note || ''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
     if (dateFrom && r.date < dateFrom) return false;
     if (dateTo && r.date > dateTo) return false;
     return true;

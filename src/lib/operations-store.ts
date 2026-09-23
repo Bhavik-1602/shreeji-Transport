@@ -158,10 +158,127 @@ export function deleteFastag(id: string): Fastag[] {
 export async function syncFastagFromSupabase(): Promise<Fastag[]> {
   const remote = await fetchSupabaseFastag();
   if (remote !== null && remote.length > 0) {
-    saveStored(KEYS.fastag, remote);
-    return remote;
+    // Keep local trip-synced rows that are not yet on remote
+    const local = getStoredFastag();
+    const remoteIds = new Set(remote.map(r => r.id));
+    const localOnly = local.filter(l => !remoteIds.has(l.id));
+    const merged = [...remote, ...localOnly];
+    saveStored(KEYS.fastag, merged);
+    return merged;
   }
   return getStoredFastag();
+}
+
+function tripFastagNote(sr: string, isReturn?: boolean, from?: string, to?: string): string {
+  const leg = isReturn ? 'Return' : 'Onward';
+  const route = from || to ? ` (${from || '—'} to ${to || '—'})` : '';
+  return `Trip ${sr} ${leg} Toll/FASTag${route}`;
+}
+
+/** Sync trip toll / other road expenses into Fastag module */
+export function syncFastagFromTrips(trips: Array<{
+  id: string;
+  sr_number: string;
+  date: string;
+  vehicle_no: string;
+  payment_mode?: PaymentMode | null;
+  toll?: number | null;
+  other_expense?: number | null;
+  loading_from?: string;
+  loading_to?: string;
+  is_return_leg?: boolean;
+}>): Fastag[] {
+  let list = getStoredFastag();
+  let changed = false;
+  const DEFAULT_TRANSPORT_ID = 'a0000000-0000-0000-0000-000000000001';
+
+  for (const t of trips) {
+    const toll = Number(t.toll) || 0;
+    const other = Number(t.other_expense) || 0;
+    const amount = toll + other;
+    const note = tripFastagNote(t.sr_number, t.is_return_leg, t.loading_from, t.loading_to);
+    const srKey = (t.sr_number || '').trim().toLowerCase();
+    const existingIdx = list.findIndex(f => {
+      const n = (f.note || '').toLowerCase();
+      if (!srKey) return false;
+      const mentionsSr = n.includes(srKey) || n.includes(`trip ${srKey}`);
+      const isReturnNote = n.includes('return');
+      if (t.is_return_leg) return mentionsSr && isReturnNote;
+      return mentionsSr && !isReturnNote && n.includes('toll');
+    });
+
+    if (amount > 0) {
+      const mode = (t.payment_mode || 'upi') as PaymentMode;
+      if (existingIdx >= 0) {
+        const existing = list[existingIdx];
+        if (
+          existing.recharge_amount !== amount ||
+          existing.vehicle_no !== (t.vehicle_no || null) ||
+          existing.date !== t.date
+        ) {
+          const updated: Fastag = {
+            ...existing,
+            date: t.date || existing.date,
+            recharge_amount: amount,
+            payment_mode: mode,
+            vehicle_no: t.vehicle_no || existing.vehicle_no,
+            note: other > 0 && toll > 0
+              ? `${note} | Toll ₹${toll} + Other ₹${other}`
+              : other > 0 && toll <= 0
+                ? `${note.replace('Toll/FASTag', 'Other Expense')} | ₹${other}`
+                : note,
+          };
+          list[existingIdx] = updated;
+          changed = true;
+          upsertSupabaseFastag(updated).catch(() => {});
+        }
+      } else {
+        const entry: Fastag = {
+          id: generateUUID(),
+          transport_id: DEFAULT_TRANSPORT_ID,
+          fastag_no: getNextFastagNo(t.vehicle_no),
+          date: t.date || new Date().toISOString().slice(0, 10),
+          recharge_amount: amount,
+          payment_mode: mode,
+          vehicle_no: t.vehicle_no || null,
+          note: other > 0 && toll > 0
+            ? `${note} | Toll ₹${toll} + Other ₹${other}`
+            : other > 0 && toll <= 0
+              ? `Trip ${t.sr_number} ${t.is_return_leg ? 'Return' : 'Onward'} Other Expense (${t.loading_from || '—'} to ${t.loading_to || '—'}) | ₹${other}`
+              : note,
+          created_at: new Date().toISOString(),
+        };
+        // Avoid duplicate FT numbers when adding multiple in one sync loop
+        list = [entry, ...list];
+        changed = true;
+        upsertSupabaseFastag(entry).catch(() => {});
+      }
+    } else if (existingIdx >= 0) {
+      const removed = list.splice(existingIdx, 1)[0];
+      changed = true;
+      if (removed?.id) deleteSupabaseFastag(removed.id).catch(() => {});
+    }
+  }
+
+  if (changed) {
+    saveStored(KEYS.fastag, list);
+  }
+  return list;
+}
+
+export function recordOrUpdateFastagForTrip(trip: {
+  id: string;
+  sr_number: string;
+  date: string;
+  vehicle_no: string;
+  payment_mode?: PaymentMode | null;
+  toll?: number | null;
+  other_expense?: number | null;
+  loading_from?: string;
+  loading_to?: string;
+  is_return_leg?: boolean;
+}): void {
+  syncFastagFromTrips([trip]);
 }
 
 // ─── Payment ────────────────────────────────────────────
@@ -306,6 +423,7 @@ export function removePaymentForTrip(tripRef: string): Payment[] {
 }
 
 export function syncPaymentsFromTrips(trips: Array<{
+  id?: string;
   sr_number: string;
   date: string;
   party_name: string;
@@ -316,68 +434,29 @@ export function syncPaymentsFromTrips(trips: Array<{
   payment_mode?: PaymentMode | null;
   payment_status?: string;
   notes?: string | null;
+  is_return_leg?: boolean;
 }>) {
-  const list = getStoredPayments();
-  let changed = false;
-
   for (const t of trips) {
-    const rec = t.received_amount != null ? Number(t.received_amount) : (t.payment_status === 'received' ? (t.total_freight ?? 0) : 0);
-    if (rec > 0) {
-      const existing = list.find(p => p.trip_ref && p.trip_ref.trim().toLowerCase() === t.sr_number.trim().toLowerCase());
-      if (!existing) {
-        const rawAccount = (t.payment_mode || 'Jaymin - HDFC').trim();
-        let resolvedAccount = rawAccount;
-        const rawLower = rawAccount.toLowerCase();
-        let resolvedMode: PaymentMode = 'bank_transfer';
-
-        if (rawLower === 'cash' || rawLower === 'case') {
-          resolvedAccount = 'Cash';
-          resolvedMode = 'cash';
-        } else if (rawLower === 'online' || rawLower === 'upi' || rawLower === 'online / upi') {
-          resolvedAccount = 'Online / UPI';
-          resolvedMode = 'upi';
-        } else if (rawLower === 'bank_transfer') {
-          resolvedAccount = 'Jaymin - HDFC';
-          resolvedMode = 'bank_transfer';
-        } else {
-          resolvedAccount = rawAccount;
-          if (rawLower.includes('cash') || rawLower.includes('case')) {
-            resolvedMode = 'cash';
-          } else if (rawLower.includes('online') || rawLower.includes('upi')) {
-            resolvedMode = 'upi';
-          } else {
-            resolvedMode = 'bank_transfer';
-          }
-        }
-
-        const tf = t.total_freight ?? 0;
-        const bal = t.balance_amount != null ? Number(t.balance_amount) : Math.max(0, tf - rec);
-
-        const newPay: Payment = {
-          id: generateUUID(),
-          transport_id: 'a0000000-0000-0000-0000-000000000001',
-          date: t.date || new Date().toISOString().slice(0, 10),
-          party_name: t.party_name,
-          vehicle_no: t.vehicle_no || null,
-          trip_ref: t.sr_number,
-          freight_amount: tf,
-          received_amount: rec,
-          balance: bal,
-          payment_mode: resolvedMode,
-          bank_account: resolvedAccount,
-          transaction_ref: null,
-          note: `Freight collection for ${t.sr_number}`,
-          created_at: new Date().toISOString(),
-        };
-        list.push(newPay);
-        changed = true;
-        upsertSupabasePayment(newPay).catch(() => {});
-      }
+    const tf = t.total_freight != null ? Number(t.total_freight) : 0;
+    const rec = t.received_amount != null
+      ? Number(t.received_amount)
+      : (t.payment_status === 'received' ? tf : 0);
+    // Show on Payment page when freight or received amount was filled on the trip
+    if (tf > 0 || rec > 0) {
+      const tripRef = t.is_return_leg ? `${t.sr_number} (Return)` : t.sr_number;
+      const bal = t.balance_amount != null ? Number(t.balance_amount) : Math.max(0, tf - rec);
+      recordOrUpdatePaymentForTrip(tripRef, {
+        date: t.date,
+        party_name: t.party_name,
+        vehicle_no: t.vehicle_no,
+        freight_amount: tf,
+        received_amount: rec,
+        balance: bal,
+        payment_mode: t.payment_mode || 'Jaymin - HDFC',
+        bank_account: t.payment_mode || 'Jaymin - HDFC',
+        note: t.notes || `Freight collection for ${tripRef}`,
+      });
     }
-  }
-
-  if (changed) {
-    saveStored(KEYS.payment, list);
   }
 }
 
@@ -448,9 +527,112 @@ export function deleteDriverSummary(id: string): DriverSummary[] {
 export async function syncDriverSummariesFromSupabase(): Promise<DriverSummary[]> {
   const remote = await fetchSupabaseDriverSummaries();
   if (remote !== null && remote.length > 0) {
-    saveStored(KEYS.driverSummary, remote);
-    return remote;
+    const local = getStoredDriverSummaries();
+    const remoteIds = new Set(remote.map(r => r.id));
+    const localOnly = local.filter(l => !remoteIds.has(l.id));
+    const merged = [...remote, ...localOnly];
+    saveStored(KEYS.driverSummary, merged);
+    return merged;
   }
   return getStoredDriverSummaries();
+}
+
+function tripSilikNote(sr: string, isReturn?: boolean, from?: string, to?: string): string {
+  const route = from || to ? ` (${from || '—'} to ${to || '—'})` : '';
+  if (isReturn) return `Return leg advance for ${sr}${route}`;
+  return `Trip advance for ${sr}${route}`;
+}
+
+/** Sync trip driver silik into Driver Summary module */
+export function syncDriverSummariesFromTrips(trips: Array<{
+  id: string;
+  sr_number: string;
+  date: string;
+  silik_date?: string | null;
+  vehicle_no: string;
+  driver_name: string;
+  driver_silik?: number | null;
+  loading_from?: string;
+  loading_to?: string;
+  is_return_leg?: boolean;
+}>): DriverSummary[] {
+  let list = getStoredDriverSummaries();
+  let changed = false;
+  const DEFAULT_TRANSPORT_ID = 'a0000000-0000-0000-0000-000000000001';
+
+  for (const t of trips) {
+    const silik = Number(t.driver_silik) || 0;
+    const srKey = (t.sr_number || '').trim().toLowerCase();
+    const existingIdx = list.findIndex(d => {
+      const n = (d.note || '').toLowerCase();
+      if (!srKey || !n.includes(srKey)) return false;
+      const isReturnNote = n.includes('return');
+      return t.is_return_leg ? isReturnNote : !isReturnNote;
+    });
+
+    if (silik > 0) {
+      const note = tripSilikNote(t.sr_number, t.is_return_leg, t.loading_from, t.loading_to);
+      const entryDate = t.silik_date || t.date || new Date().toISOString().slice(0, 10);
+      if (existingIdx >= 0) {
+        const existing = list[existingIdx];
+        if (
+          existing.silik_amount !== silik ||
+          existing.driver_name !== t.driver_name ||
+          existing.vehicle_no !== t.vehicle_no ||
+          existing.date !== entryDate
+        ) {
+          const updated: DriverSummary = {
+            ...existing,
+            date: entryDate,
+            vehicle_no: t.vehicle_no || existing.vehicle_no,
+            driver_name: t.driver_name || existing.driver_name,
+            silik_amount: silik,
+            note,
+          };
+          list[existingIdx] = updated;
+          changed = true;
+          upsertSupabaseDriverSummary(updated).catch(() => {});
+        }
+      } else {
+        const entry: DriverSummary = {
+          id: generateUUID(),
+          transport_id: DEFAULT_TRANSPORT_ID,
+          date: entryDate,
+          vehicle_no: t.vehicle_no || '—',
+          driver_name: t.driver_name || '—',
+          silik_amount: silik,
+          note,
+          created_at: new Date().toISOString(),
+        };
+        list = [entry, ...list];
+        changed = true;
+        upsertSupabaseDriverSummary(entry).catch(() => {});
+      }
+    } else if (existingIdx >= 0) {
+      const removed = list.splice(existingIdx, 1)[0];
+      changed = true;
+      if (removed?.id) deleteSupabaseDriverSummary(removed.id).catch(() => {});
+    }
+  }
+
+  if (changed) {
+    saveStored(KEYS.driverSummary, list);
+  }
+  return list;
+}
+
+export function recordOrUpdateDriverSilikForTrip(trip: {
+  id: string;
+  sr_number: string;
+  date: string;
+  silik_date?: string | null;
+  vehicle_no: string;
+  driver_name: string;
+  driver_silik?: number | null;
+  loading_from?: string;
+  loading_to?: string;
+  is_return_leg?: boolean;
+}): void {
+  syncDriverSummariesFromTrips([trip]);
 }
 
