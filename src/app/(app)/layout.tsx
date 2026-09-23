@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
@@ -26,7 +26,20 @@ const pageTitles: Record<string, string> = {
   '/masters/bank-accounts': 'Bank Accounts',
 };
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+function LoadingScreen({ message }: { message: string }) {
+  return (
+    <div className="flex h-screen items-center justify-center bg-paper">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-12 h-12 rounded-2xl bg-[#F97316] flex items-center justify-center animate-pulse">
+          <span className="text-white font-bold text-xl">श्री</span>
+        </div>
+        <p className="text-[14px] text-muted font-medium">{message}</p>
+      </div>
+    </div>
+  );
+}
+
+function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -46,48 +59,36 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     setSidebarOpen(false);
   }, [pathname]);
 
-  // Loading state while checking auth
   if (loading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-paper">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-[#F97316] flex items-center justify-center animate-pulse">
-            <span className="text-white font-bold text-xl">श्री</span>
-          </div>
-          <p className="text-[14px] text-muted font-medium">Loading ERP...</p>
-        </div>
-      </div>
-    );
+    return <LoadingScreen message="Loading ERP..." />;
   }
 
-  // If not logged in and configured, prevent flash before redirect
   if (isConfigured && !user) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-paper">
-        <div className="flex flex-col items-center gap-3">
-          <p className="text-[14px] text-muted">Redirecting to login...</p>
-        </div>
-      </div>
-    );
+    return <LoadingScreen message="Redirecting to login..." />;
   }
 
   return (
     <div className="flex h-screen overflow-hidden bg-paper">
-      {/* Sidebar */}
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-      {/* Main area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <Header
           title={title}
           onMenuToggle={() => setSidebarOpen(true)}
         />
 
-        {/* Page content */}
         <main className="flex-1 min-w-0 max-w-full overflow-y-auto overflow-x-hidden p-3 sm:p-4 lg:p-6">
           {children}
         </main>
       </div>
     </div>
+  );
+}
+
+export default function AppLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={<LoadingScreen message="Loading ERP..." />}>
+      <AppLayoutInner>{children}</AppLayoutInner>
+    </Suspense>
   );
 }
