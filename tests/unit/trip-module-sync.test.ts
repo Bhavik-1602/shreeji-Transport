@@ -118,4 +118,119 @@ describe('trip → module sync', () => {
     expect(getStoredPayments().some(p => p.trip_ref === 'SR-EMPTY1')).toBe(false);
     expect(getStoredDriverSummaries().some(s => (s.note || '').includes('SR-EMPTY1'))).toBe(false);
   });
+
+  it('does not treat a different number as the same SR', async () => {
+    const { isSrNumberMatch } = await import('@/lib/trip-store');
+    expect(isSrNumberMatch('SR-000001', 'SR0001')).toBe(true);
+    expect(isSrNumberMatch('SR-000001', 'SR-0000010')).toBe(false);
+    expect(isSrNumberMatch('SR-000008', '8')).toBe(false);
+    expect(isSrNumberMatch('SR-000008', 'SR-000018')).toBe(false);
+  });
+
+  it('replaces inflated duplicate payments with the amount entered on the trip', async () => {
+    store['shreeji_transport_payment_v6'] = JSON.stringify([
+      {
+        id: 'pay-huge-1',
+        transport_id: 'a0000000-0000-0000-0000-000000000001',
+        date: '2026-09-23',
+        party_name: 'TEST PARTY',
+        trip_ref: 'SR-TEST01',
+        freight_amount: 30000,
+        received_amount: 2430000,
+        balance: 0,
+        payment_mode: 'bank_transfer',
+        bank_account: 'Jaymin - HDFC',
+        created_at: '2026-09-23T00:00:00.000Z',
+      },
+      {
+        id: 'pay-huge-2',
+        transport_id: 'a0000000-0000-0000-0000-000000000001',
+        date: '2026-09-23',
+        party_name: 'TEST PARTY',
+        trip_ref: 'SR-TEST01',
+        freight_amount: 30000,
+        received_amount: 233710000,
+        balance: 0,
+        payment_mode: 'bank_transfer',
+        bank_account: 'Jaymin - HDFC',
+        created_at: '2026-09-23T00:00:00.000Z',
+      },
+      {
+        id: 'pay-other',
+        transport_id: 'a0000000-0000-0000-0000-000000000001',
+        date: '2026-09-23',
+        party_name: 'SOMEONE ELSE',
+        trip_ref: '8',
+        freight_amount: 999,
+        received_amount: 999,
+        balance: 0,
+        payment_mode: 'cash',
+        bank_account: 'Cash',
+        created_at: '2026-09-23T00:00:00.000Z',
+      },
+    ]);
+
+    const { saveTrip, getStoredTrips } = await import('@/lib/trip-store');
+    const { getStoredPayments, getStoredFastag, getStoredDriverSummaries } = await import('@/lib/operations-store');
+
+    store['shreeji_transport_fastag_v6'] = JSON.stringify([
+      {
+        id: 'ft-1',
+        transport_id: 'a0000000-0000-0000-0000-000000000001',
+        fastag_no: 'FT-1',
+        date: '2026-09-23',
+        recharge_amount: 1,
+        payment_mode: 'upi',
+        vehicle_no: 'GJ03CW9144',
+        note: 'Trip SR-TEST01 Onward Toll/FASTag (A to B)',
+        created_at: '2026-09-23T00:00:00.000Z',
+      },
+      {
+        id: 'ft-2',
+        transport_id: 'a0000000-0000-0000-0000-000000000001',
+        fastag_no: 'FT-2',
+        date: '2026-09-23',
+        recharge_amount: 2,
+        payment_mode: 'upi',
+        vehicle_no: 'GJ03CW9144',
+        note: 'Trip SR-TEST01 Onward Toll/FASTag (A to B) duplicate',
+        created_at: '2026-09-23T00:00:00.000Z',
+      },
+    ]);
+
+    saveTrip({
+      sr_number: 'SR-TEST01',
+      date: '2026-09-23',
+      vehicle_no: 'GJ03CW9144',
+      driver_name: 'TEST DRIVER',
+      party_name: 'TEST PARTY',
+      loading_from: 'Morbi (Gujarat)',
+      loading_to: 'Ahmedabad (Gujarat)',
+      total_freight: 30000,
+      received_amount: 10000,
+      payment_mode: 'Jaymin - HDFC',
+      payment_status: 'partial',
+      toll: 3235,
+      other_expense: 200,
+      driver_silik: 5000,
+      silik_payment_mode: 'Cash',
+    });
+
+    const forTrip = getStoredPayments().filter(p => (p.trip_ref || '').toUpperCase().includes('SR-TEST01'));
+    expect(forTrip).toHaveLength(1);
+    expect(forTrip[0].received_amount).toBe(10000);
+    expect(forTrip[0].freight_amount).toBe(30000);
+    expect(getStoredPayments().find(p => p.trip_ref === '8')?.received_amount).toBe(999);
+
+    const trip = getStoredTrips().find(t => t.sr_number === 'SR-TEST01');
+    expect(trip?.received_amount).toBe(10000);
+
+    const fastag = getStoredFastag().filter(f => (f.note || '').includes('SR-TEST01'));
+    expect(fastag).toHaveLength(1);
+    expect(fastag[0].recharge_amount).toBe(3435);
+
+    const silik = getStoredDriverSummaries().find(s => (s.note || '').includes('SR-TEST01'));
+    expect(silik?.silik_amount).toBe(5000);
+    expect(silik?.note || '').toContain('Silik via Cash');
+  });
 });

@@ -18,6 +18,7 @@ import {
 import { getStoredTrips, syncTripsFromSupabase } from '@/lib/trip-store';
 import { getVehicles, getDrivers, syncVehiclesFromSupabase, syncDriversFromSupabase } from '@/lib/master-store';
 import type { DieselEntry, Vehicle, Driver } from '@/types/database';
+import { useToast } from '@/components/Toast';
 
 const emptyForm = (): Partial<DieselEntry> => ({
   date: new Date().toISOString().slice(0, 10),
@@ -31,6 +32,7 @@ const emptyForm = (): Partial<DieselEntry> => ({
 });
 
 export default function DieselPage() {
+  const toast = useToast();
   const [entries, setEntries] = useState<DieselEntry[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -59,20 +61,13 @@ export default function DieselPage() {
     };
 
     refreshData();
-    syncDieselFromSupabase().then(() => {
+    Promise.all([
+      syncDieselFromSupabase().catch(() => null),
+      syncTripsFromSupabase().catch(() => null),
+    ]).then(() => {
       const trips = getStoredTrips();
-      if (trips && trips.length > 0) {
-        const synced = syncDieselFromTrips(trips);
-        setEntries([...synced]);
-      } else {
-        setEntries(getStoredDiesel());
-      }
-    });
-    syncTripsFromSupabase().then(trips => {
-      if (trips && trips.length > 0) {
-        const synced = syncDieselFromTrips(trips);
-        setEntries([...synced]);
-      }
+      const synced = trips.length > 0 ? syncDieselFromTrips(trips) : getStoredDiesel();
+      setEntries([...synced]);
     });
     syncVehiclesFromSupabase().then(v => {
       if (v && v.length > 0) setVehicles([...v]);
@@ -105,7 +100,7 @@ export default function DieselPage() {
       if (truckFilter && !truck.includes(truckFilter.toLowerCase())) return false;
       if (driverFilter && !driver.includes(driverFilter.toLowerCase())) return false;
       return true;
-    });
+    }).sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.sr_no || 0) - (a.sr_no || 0));
   }, [entries, search, dateFrom, dateTo, truckFilter, driverFilter]);
 
   // Statistics
@@ -164,12 +159,13 @@ export default function DieselPage() {
     if (confirm(`Are you sure you want to delete Diesel Slip ${slipNo || id} (Amount: ${formatCurrency(amount)})?`)) {
       const updated = deleteDieselEntry(id);
       setEntries([...updated]);
+      toast.success('Diesel entry deleted', { message: `${slipNo ? `Slip ${slipNo} · ` : ''}${formatCurrency(amount)}` });
     }
   }
 
   function handleSubmit() {
     if (!form.date || !form.truck_no || !form.diesel_liter || !form.rate) {
-      alert('Please fill Date, Truck No, Diesel Liter and Rate.');
+      toast.error('Some details are missing', { message: 'Please fill Date, Truck No, Diesel Liter and Rate.' });
       return;
     }
 
@@ -187,6 +183,9 @@ export default function DieselPage() {
 
     setEntries([...updated]);
     setShowModal(false);
+    toast.success(editId ? 'Diesel entry updated' : 'Diesel entry added', {
+      message: `${form.truck_no} · ${liter} L · ${formatCurrency(amount)}`,
+    });
   }
 
   return (
@@ -210,7 +209,7 @@ export default function DieselPage() {
           </p>
         </div>
 
-        <Button variant="primary" onClick={openCreate} className="gap-2 shadow-sm font-semibold">
+        <Button variant="primary" onClick={openCreate} className="gap-2 shadow-sm font-semibold w-full sm:w-auto">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
             <path d="M8 3v10M3 8h10" />
           </svg>
@@ -219,7 +218,7 @@ export default function DieselPage() {
       </div>
 
       {/* Summary KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+      <div className="grid grid-cols-1 min-[481px]:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-3.5">
         <Card className="p-4 bg-paper/80 border border-line">
           <p className="text-[12px] font-semibold text-muted">Total Diesel Litres</p>
           <p className="text-2xl font-bold text-ink mt-1 font-mono tracking-tight">
@@ -427,13 +426,13 @@ export default function DieselPage() {
       <Modal
         open={showModal}
         onClose={() => setShowModal(false)}
-        title={editId ? 'Edit Diesel Slip' : 'Add Diesel Entry (ડીઝલ સ્લિપ નોંધો)'}
+        title={editId ? 'Edit Diesel Slip' : 'Add Diesel Entry'}
         size="md"
       >
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-4">
             <TextField
-              label="Date (તારીખ) *"
+              label="Date *"
               type="date"
               value={form.date ?? ''}
               onChange={e => setForm(prev => ({ ...prev, date: e.target.value }))}
@@ -441,7 +440,7 @@ export default function DieselPage() {
             />
 
             <TextField
-              label="Slip No. (સ્લિપ નંબર) *"
+              label="Slip No. *"
               value={form.slip_no ?? ''}
               onChange={e => setForm(prev => ({ ...prev, slip_no: e.target.value }))}
               placeholder="e.g. 117"
@@ -449,11 +448,11 @@ export default function DieselPage() {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-4">
             {/* Truck No */}
             <div>
               <label className="block text-[13px] font-medium text-ink mb-1.5">
-                Truck No. (વાહન નંબર) *
+                Truck No. *
               </label>
               {isCustomTruck ? (
                 <div className="space-y-1">
@@ -502,7 +501,7 @@ export default function DieselPage() {
             {/* Driver Name */}
             <div>
               <label className="block text-[13px] font-medium text-ink mb-1.5">
-                Driver Name (ડ્રાઈવર) *
+                Driver Name *
               </label>
               {isCustomDriver ? (
                 <div className="space-y-1">
@@ -551,9 +550,9 @@ export default function DieselPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 min-[481px]:grid-cols-3 gap-3">
             <TextField
-              label="Diesel Liter (લીટર) *"
+              label="Diesel Litres *"
               type="number"
               step="0.01"
               value={form.diesel_liter ?? ''}
@@ -563,7 +562,7 @@ export default function DieselPage() {
             />
 
             <TextField
-              label="Rate (ભાવ પ્રતિ લીટર) *"
+              label="Rate per Litre *"
               type="number"
               step="0.01"
               value={form.rate ?? ''}
@@ -573,7 +572,7 @@ export default function DieselPage() {
             />
 
             <TextField
-              label="Amount (કુલ રકમ ₹) *"
+              label="Amount (₹) *"
               type="number"
               step="0.01"
               value={form.amount ?? ''}
@@ -584,7 +583,7 @@ export default function DieselPage() {
           </div>
 
           <TextField
-            label="Notes / Pump / Remarks (વધારાની નોંધ)"
+            label="Notes / Pump / Remarks"
             value={form.notes ?? ''}
             onChange={e => setForm(prev => ({ ...prev, notes: e.target.value }))}
             placeholder="e.g. Reliance pump Kodinar..."

@@ -4,6 +4,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import type { User, Session, AuthError } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
 import { createSupabaseBrowserClient, isSupabaseConfigured } from '@/lib/supabase-browser';
+import { useToast } from '@/components/Toast';
 
 interface AuthContextType {
   user: User | null;
@@ -21,6 +22,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+  const toast = useToast();
   const configured = isSupabaseConfigured();
 
   useEffect(() => {
@@ -32,16 +34,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const supabase = createSupabaseBrowserClient();
 
     // Fetch initial session
-    supabase.auth.getSession().then(({ data: { session }, error }) => {
-      if (!error && session) {
-        setSession(session);
-        setUser(session.user);
-      } else {
+    supabase.auth
+      .getSession()
+      .then(({ data: { session }, error }) => {
+        if (!error && session) {
+          setSession(session);
+          setUser(session.user);
+        } else {
+          setSession(null);
+          setUser(null);
+        }
+      })
+      .catch(() => {
         setSession(null);
         setUser(null);
-      }
-      setLoading(false);
-    });
+      })
+      .finally(() => setLoading(false));
 
     // Listen for auth state changes
     const {
@@ -79,6 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setUser(null);
       setSession(null);
+      toast.info('You have been logged out');
       router.push('/login');
     }
   };

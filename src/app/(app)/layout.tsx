@@ -1,15 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import { useAuth } from '@/context/auth-context';
 
 const pageTitles: Record<string, string> = {
   '/dashboard': 'Dashboard',
-  '/daily-hisab': 'Trips & Daily Hisab',
-  '/trips': 'Trips & Daily Hisab',
+  '/daily-hisab': 'Trips',
+  '/trips': 'Trips',
   '/trips/new': 'New Trip Entry',
   '/maintenance': 'Vehicle Maintenance',
   '/fastag': 'FASTag Recharges',
@@ -21,20 +21,30 @@ const pageTitles: Record<string, string> = {
   '/masters/vehicles': 'Vehicles Master',
   '/masters/drivers': 'Drivers Master',
   '/masters/parties': 'Parties Master',
+  '/masters/pumps': 'Pumps Master',
+  '/masters/locations': 'Locations Master',
+  '/masters/bank-accounts': 'Bank Accounts',
 };
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const { user, loading, isConfigured } = useAuth();
-  const title = pageTitles[pathname] || 'Shreeji Transport';
+  const title = pathname === '/trips/new'
+    ? (searchParams.get('view') === '1' ? 'View Trip' : searchParams.get('id') ? 'Edit Trip' : 'New Trip Entry')
+    : (pageTitles[pathname] || 'Shreeji Transport');
 
   useEffect(() => {
     if (!loading && isConfigured && !user) {
       router.replace('/login');
     }
   }, [loading, isConfigured, user, router]);
+
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [pathname]);
 
   // Loading state while checking auth
   if (loading) {
@@ -74,7 +84,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         />
 
         {/* Page content */}
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+        <main className="flex-1 min-w-0 max-w-full overflow-y-auto overflow-x-hidden p-3 sm:p-4 lg:p-6">
           {children}
         </main>
       </div>

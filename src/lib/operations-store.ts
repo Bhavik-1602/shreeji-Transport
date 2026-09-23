@@ -169,6 +169,14 @@ export async function syncFastagFromSupabase(): Promise<Fastag[]> {
   return getStoredFastag();
 }
 
+/** True when a note cites this SR, without letting SR-000001 match SR-0000010. */
+function noteMentionsSr(note: string, sr: string): boolean {
+  const key = sr.trim().toLowerCase();
+  if (!key) return false;
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`${escaped}(?!\\d)`, 'i').test(note);
+}
+
 function tripFastagNote(sr: string, isReturn?: boolean, from?: string, to?: string): string {
   const leg = isReturn ? 'Return' : 'Onward';
   const route = from || to ? ` (${from || '—'} to ${to || '—'})` : '';
@@ -197,22 +205,25 @@ export function syncFastagFromTrips(trips: Array<{
     const other = Number(t.other_expense) || 0;
     const amount = toll + other;
     const note = tripFastagNote(t.sr_number, t.is_return_leg, t.loading_from, t.loading_to);
-    const srKey = (t.sr_number || '').trim().toLowerCase();
-    const existingIdx = list.findIndex(f => {
-      const n = (f.note || '').toLowerCase();
-      if (!srKey) return false;
-      const mentionsSr = n.includes(srKey) || n.includes(`trip ${srKey}`);
-      const isReturnNote = n.includes('return');
-      if (t.is_return_leg) return mentionsSr && isReturnNote;
-      return mentionsSr && !isReturnNote && n.includes('toll');
+    const matchIndexes: number[] = [];
+    list.forEach((f, idx) => {
+      const n = f.note || '';
+      if (!noteMentionsSr(n, t.sr_number || '')) return;
+      const lower = n.toLowerCase();
+      const isReturnNote = lower.includes('return');
+      const isThisLeg = t.is_return_leg
+        ? isReturnNote
+        : !isReturnNote && (lower.includes('toll') || lower.includes('other expense'));
+      if (isThisLeg) matchIndexes.push(idx);
     });
+    const existingIdx = matchIndexes[0] ?? -1;
 
     if (amount > 0) {
       const mode = (t.payment_mode || 'upi') as PaymentMode;
       if (existingIdx >= 0) {
         const existing = list[existingIdx];
         if (
-          existing.recharge_amount !== amount ||
+          Number(existing.recharge_amount) !== Number(amount) ||
           existing.vehicle_no !== (t.vehicle_no || null) ||
           existing.date !== t.date
         ) {
@@ -253,10 +264,18 @@ export function syncFastagFromTrips(trips: Array<{
         changed = true;
         upsertSupabaseFastag(entry).catch(() => {});
       }
+
+      const extraIds = matchIndexes.slice(1).map(idx => list[idx]?.id).filter(Boolean) as string[];
+      if (extraIds.length > 0) {
+        list = list.filter(f => !extraIds.includes(f.id));
+        changed = true;
+        extraIds.forEach(id => deleteSupabaseFastag(id).catch(() => {}));
+      }
     } else if (existingIdx >= 0) {
-      const removed = list.splice(existingIdx, 1)[0];
+      const removedIds = matchIndexes.map(idx => list[idx]?.id).filter(Boolean) as string[];
+      list = list.filter(f => !removedIds.includes(f.id));
       changed = true;
-      if (removed?.id) deleteSupabaseFastag(removed.id).catch(() => {});
+      removedIds.forEach(id => deleteSupabaseFastag(id).catch(() => {}));
     }
   }
 
@@ -340,6 +359,10 @@ export async function syncPaymentsFromSupabase(): Promise<Payment[]> {
 
 }
 
+function paymentRefKey(ref: string | null | undefined): string {
+  return (ref || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
 export function recordOrUpdatePaymentForTrip(
   tripRef: string,
   paymentData: {
@@ -356,15 +379,12 @@ export function recordOrUpdatePaymentForTrip(
   }
 ): Payment {
   const list = getStoredPayments();
-  const cleanRef = tripRef.trim().toLowerCase();
-  const cleanAlnum = cleanRef.replace(/[^a-z0-9]/g, '');
-  const existingIndex = list.findIndex(p => {
-    if (!p.trip_ref) return false;
-    const pRef = p.trip_ref.trim().toLowerCase();
-    if (pRef === cleanRef) return true;
-    const pAlnum = pRef.replace(/[^a-z0-9]/g, '');
-    return cleanAlnum.length > 0 && pAlnum === cleanAlnum;
-  });
+  const refKey = paymentRefKey(tripRef);
+  const matches = refKey
+    ? list.filter(p => p.trip_ref && paymentRefKey(p.trip_ref) === refKey)
+    : [];
+  const existing = matches[0];
+  const duplicateIds = matches.slice(1).map(p => p.id);
   
   const rawAccount = (paymentData.bank_account || paymentData.payment_mode || 'Jaymin - HDFC').trim();
   let resolvedAccount = rawAccount;
@@ -393,7 +413,7 @@ export function recordOrUpdatePaymentForTrip(
 
   const DEFAULT_TRANSPORT_ID = 'a0000000-0000-0000-0000-000000000001';
   const entry: Payment = {
-    id: existingIndex >= 0 ? list[existingIndex].id : generateUUID(),
+    id: existing ? existing.id : generateUUID(),
     transport_id: DEFAULT_TRANSPORT_ID,
     date: paymentData.date || new Date().toISOString().slice(0, 10),
     party_name: paymentData.party_name,
@@ -406,8 +426,27 @@ export function recordOrUpdatePaymentForTrip(
     bank_account: resolvedAccount,
     transaction_ref: paymentData.transaction_ref || null,
     note: paymentData.note || null,
-    created_at: existingIndex >= 0 ? list[existingIndex].created_at : new Date().toISOString(),
+    created_at: existing ? existing.created_at : new Date().toISOString(),
   };
+
+  const unchanged = existing && duplicateIds.length === 0
+    && Number(existing.received_amount) === Number(entry.received_amount)
+    && Number(existing.freight_amount || 0) === Number(entry.freight_amount || 0)
+    && Number(existing.balance || 0) === Number(entry.balance || 0)
+    && (existing.party_name || '') === (entry.party_name || '')
+    && (existing.vehicle_no || '') === (entry.vehicle_no || '')
+    && (existing.trip_ref || '') === (entry.trip_ref || '')
+    && (existing.bank_account || '') === (entry.bank_account || '')
+    && (existing.payment_mode || '') === (entry.payment_mode || '')
+    && (existing.note || '') === (entry.note || '')
+    && (existing.date || '') === (entry.date || '');
+  if (unchanged) return existing;
+
+  if (duplicateIds.length > 0) {
+    const pruned = getStoredPayments().filter(p => !duplicateIds.includes(p.id));
+    saveStored(KEYS.payment, pruned);
+    duplicateIds.forEach(id => deleteSupabasePayment(id).catch(() => {}));
+  }
 
   savePayment(entry);
   return entry;
@@ -537,10 +576,10 @@ export async function syncDriverSummariesFromSupabase(): Promise<DriverSummary[]
   return getStoredDriverSummaries();
 }
 
-function tripSilikNote(sr: string, isReturn?: boolean, from?: string, to?: string): string {
+function tripSilikNote(sr: string, isReturn?: boolean, from?: string, to?: string, mode?: string | null): string {
   const route = from || to ? ` (${from || '—'} to ${to || '—'})` : '';
-  if (isReturn) return `Return leg advance for ${sr}${route}`;
-  return `Trip advance for ${sr}${route}`;
+  const base = isReturn ? `Return leg advance for ${sr}${route}` : `Trip advance for ${sr}${route}`;
+  return mode ? `${base} | Silik via ${mode}` : base;
 }
 
 /** Sync trip driver silik into Driver Summary module */
@@ -552,6 +591,7 @@ export function syncDriverSummariesFromTrips(trips: Array<{
   vehicle_no: string;
   driver_name: string;
   driver_silik?: number | null;
+  silik_payment_mode?: string | null;
   loading_from?: string;
   loading_to?: string;
   is_return_leg?: boolean;
@@ -562,24 +602,30 @@ export function syncDriverSummariesFromTrips(trips: Array<{
 
   for (const t of trips) {
     const silik = Number(t.driver_silik) || 0;
-    const srKey = (t.sr_number || '').trim().toLowerCase();
-    const existingIdx = list.findIndex(d => {
-      const n = (d.note || '').toLowerCase();
-      if (!srKey || !n.includes(srKey)) return false;
-      const isReturnNote = n.includes('return');
-      return t.is_return_leg ? isReturnNote : !isReturnNote;
+    const matchIndexes: number[] = [];
+    list.forEach((d, idx) => {
+      const n = d.note || '';
+      if (!noteMentionsSr(n, t.sr_number || '')) return;
+      const isReturnNote = n.toLowerCase().includes('return');
+      if (t.is_return_leg ? isReturnNote : !isReturnNote) matchIndexes.push(idx);
     });
+    const existingIdx = matchIndexes[0] ?? -1;
 
     if (silik > 0) {
-      const note = tripSilikNote(t.sr_number, t.is_return_leg, t.loading_from, t.loading_to);
+      let note = tripSilikNote(t.sr_number, t.is_return_leg, t.loading_from, t.loading_to, t.silik_payment_mode);
+      if (!t.silik_payment_mode && existingIdx >= 0) {
+        const prevMode = (list[existingIdx].note || '').match(/\|\s*Silik via\s+.+$/);
+        if (prevMode) note = `${note} ${prevMode[0]}`;
+      }
       const entryDate = t.silik_date || t.date || new Date().toISOString().slice(0, 10);
       if (existingIdx >= 0) {
         const existing = list[existingIdx];
         if (
-          existing.silik_amount !== silik ||
+          Number(existing.silik_amount) !== Number(silik) ||
           existing.driver_name !== t.driver_name ||
           existing.vehicle_no !== t.vehicle_no ||
-          existing.date !== entryDate
+          existing.date !== entryDate ||
+          existing.note !== note
         ) {
           const updated: DriverSummary = {
             ...existing,
@@ -608,10 +654,18 @@ export function syncDriverSummariesFromTrips(trips: Array<{
         changed = true;
         upsertSupabaseDriverSummary(entry).catch(() => {});
       }
+
+      const extraIds = matchIndexes.slice(1).map(idx => list[idx]?.id).filter(Boolean) as string[];
+      if (extraIds.length > 0) {
+        list = list.filter(d => !extraIds.includes(d.id));
+        changed = true;
+        extraIds.forEach(id => deleteSupabaseDriverSummary(id).catch(() => {}));
+      }
     } else if (existingIdx >= 0) {
-      const removed = list.splice(existingIdx, 1)[0];
+      const removedIds = matchIndexes.map(idx => list[idx]?.id).filter(Boolean) as string[];
+      list = list.filter(d => !removedIds.includes(d.id));
       changed = true;
-      if (removed?.id) deleteSupabaseDriverSummary(removed.id).catch(() => {});
+      removedIds.forEach(id => deleteSupabaseDriverSummary(id).catch(() => {}));
     }
   }
 
@@ -629,6 +683,7 @@ export function recordOrUpdateDriverSilikForTrip(trip: {
   vehicle_no: string;
   driver_name: string;
   driver_silik?: number | null;
+  silik_payment_mode?: string | null;
   loading_from?: string;
   loading_to?: string;
   is_return_leg?: boolean;

@@ -13,8 +13,10 @@ import { generateUUID } from '@/lib/supabase-service';
 import { formatDate } from '@/lib/format';
 import type { Vehicle } from '@/types/database';
 import { useEffect } from 'react';
+import { useToast } from '@/components/Toast';
 
 export default function VehiclesPage() {
+  const toast = useToast();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Vehicle | null>(null);
@@ -81,11 +83,14 @@ export default function VehiclesPage() {
     const updated = saveVehicle(entry);
     setVehicles(updated);
     setShowForm(false);
+    toast.success(editing ? 'Vehicle updated' : 'Vehicle added', { message: entry.vehicle_no });
   };
 
   const toggleActive = (id: string) => {
     const updated = toggleVehicleActive(id);
     setVehicles(updated);
+    const vehicle = updated.find(v => v.id === id);
+    if (vehicle) toast.info(vehicle.is_active ? 'Vehicle activated' : 'Vehicle deactivated', { message: vehicle.vehicle_no });
   };
 
   return (
@@ -97,9 +102,9 @@ export default function VehiclesPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           onClear={() => setSearch('')}
-          wrapperClassName="flex-1 max-w-xs"
+          wrapperClassName="w-full sm:flex-1 sm:max-w-xs"
         />
-        <Button onClick={() => openForm()}>
+        <Button onClick={() => openForm()} className="w-full sm:w-auto">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
             <path d="M8 3v10M3 8h10" />
           </svg>

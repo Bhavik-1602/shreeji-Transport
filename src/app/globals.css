@@ -11,6 +11,12 @@
 
 /* ── Base ──────────────────────────────────────────────────────── */
 
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 body {
   @apply bg-paper text-ink;
   font-family: var(--font-sans);
@@ -28,6 +34,15 @@ body {
 }
 
 /* ── Scrollbar for horizontal-scrolling tables ──────────────────── */
+
+.table-scroll {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
 
 .table-scroll::-webkit-scrollbar {
   height: 6px;
@@ -98,6 +113,61 @@ input[class*="pr-10"] {
   padding-right: 2.5rem !important;
 }
 
+/* Keep grids and fields inside the viewport on small screens */
+main {
+  overflow-wrap: break-word;
+}
+
+main .flex > h1,
+main .flex > h2,
+main .flex > h3 {
+  min-width: 0;
+}
+
+.grid > * {
+  min-width: 0;
+}
+
+input,
+select,
+textarea,
+button {
+  max-width: 100%;
+}
+
+input,
+select,
+textarea {
+  min-width: 0;
+}
+
+/* Filter rows stack on phones; desktop flex layout is unchanged from sm up */
+@media (max-width: 639px) {
+  .filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .filter-bar > * {
+    width: 100%;
+    max-width: 100% !important;
+  }
+
+  .filter-bar .filter-inline {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+  }
+
+  .filter-bar .filter-inline > input,
+  .filter-bar .filter-inline > select {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+  }
+}
+
 /* Read-only computed field tint */
 .computed-field {
   @apply bg-primary/5 border-primary/20 text-primary font-medium;
@@ -125,6 +195,42 @@ input[class*="pr-10"] {
 }
 .sidebar-enter-active {
   transform: translateX(0);
+}
+
+/* Toast notifications */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes toast-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-8px); }
+}
+@keyframes toast-progress {
+  from { width: 100%; }
+  to { width: 0%; }
+}
+.toast-enter {
+  animation: toast-in 180ms ease-out both;
+}
+.toast-leave {
+  animation: toast-out 200ms ease-in both;
+}
+.toast-progress {
+  animation-name: toast-progress;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast-enter,
+  .toast-leave {
+    animation: none;
+  }
+}
+@media print {
+  [aria-live] {
+    display: none !important;
+  }
 }
 
 /* ── Print styles ────────────────────────────────────────────────── */

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { clsx } from 'clsx';
@@ -152,6 +153,17 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { user, signOut } = useAuth();
 
+  useEffect(() => {
+    if (!open) return;
+    const desktop = window.matchMedia('(min-width: 1024px)');
+    if (desktop.matches) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [open]);
+
   return (
     <>
       {/* Mobile backdrop */}
@@ -165,7 +177,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
       {/* Sidebar panel */}
       <aside
         className={clsx(
-          'fixed top-0 left-0 z-50 h-full w-64 bg-panel border-r border-line flex flex-col',
+          'fixed top-0 left-0 z-50 h-full w-[min(16rem,88vw)] lg:w-64 bg-panel border-r border-line flex flex-col',
           'transition-transform duration-200 ease-out',
           'lg:translate-x-0 lg:static lg:z-auto',
           open ? 'translate-x-0' : '-translate-x-full',
@@ -214,7 +226,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
                 href={item.href}
                 onClick={onClose}
                 className={clsx(
-                  'flex items-center gap-3 px-3 py-2.5 rounded-lg text-[14px] font-medium transition-colors duration-150 mb-0.5',
+                  'flex items-center gap-3 px-3 py-3 lg:py-2.5 rounded-lg text-[14px] font-medium transition-colors duration-150 mb-0.5',
                   isActive
                     ? 'bg-primary/10 text-primary'
                     : 'text-muted hover:bg-paper hover:text-ink',

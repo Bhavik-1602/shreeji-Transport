@@ -20,8 +20,10 @@ import {
   type UnifiedTrip,
 } from '@/lib/trip-store';
 import type { PaymentMode, PaymentStatus, Vehicle, Driver, BankAccount } from '@/types/database';
+import { useToast } from '@/components/Toast';
 
 export default function TripsPage() {
+  const toast = useToast();
   const [trips, setTrips] = useState<UnifiedTrip[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -142,6 +144,7 @@ export default function TripsPage() {
     if (confirm(`Are you sure you want to delete trip ${sr}?`)) {
       const updated = deleteTrip(id);
       setTrips([...updated]);
+      toast.success('Trip deleted', { message: `Trip ${sr}` });
     }
   };
 
@@ -176,6 +179,11 @@ export default function TripsPage() {
     if (updated) {
       // Re-read immediately from memory store to reflect new payment status
       setTrips([...getStoredTrips()]);
+      toast.success('Payment updated', {
+        message: `Trip ${editingTrip.sr_number} · ${formatCurrency(numReceived)} received`,
+      });
+    } else {
+      toast.error('Payment could not be updated', { message: 'Please refresh the page and try again.' });
     }
     setEditingTrip(null);
   };
@@ -184,13 +192,13 @@ export default function TripsPage() {
     <div className="space-y-4">
       {/* Top bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3 flex-1">
+        <div className="flex items-center gap-3 flex-1 min-w-0 w-full">
           <SearchInput
             placeholder="Search SR, vehicle, driver, party..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onClear={() => setSearch('')}
-            wrapperClassName="flex-1 max-w-xs"
+            wrapperClassName="flex-1 min-w-0 w-full sm:max-w-xs"
           />
           <Button variant="secondary" size="sm" onClick={() => setShowFilters(!showFilters)}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2 4h12M4 8h8M6 12h4" /></svg>
@@ -198,8 +206,8 @@ export default function TripsPage() {
             {hasFilters && <span className="w-2 h-2 rounded-full bg-primary" />}
           </Button>
         </div>
-        <Link href="/trips/new">
-          <Button>
+        <Link href="/trips/new" className="w-full sm:w-auto">
+          <Button className="w-full sm:w-auto">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>
             Add Trip
           </Button>
@@ -241,10 +249,10 @@ export default function TripsPage() {
       )}
 
       {/* Prominent Payment Breakdown Summary Bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-1 min-[481px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <div className="p-3 bg-panel rounded-xl border border-line">
           <span className="text-[11px] font-semibold text-muted uppercase block">Trips Count</span>
-          <strong className="text-[17px] font-bold text-ink block mt-0.5">
+          <strong className="text-[15px] sm:text-[17px] font-bold break-words text-ink block mt-0.5">
             {onwardCount} Trips
             {returnCount > 0 && (
               <span className="text-[11px] font-medium text-amber-700 ml-1.5">(+{returnCount} Return)</span>
@@ -252,24 +260,24 @@ export default function TripsPage() {
           </strong>
         </div>
         <div className="p-3 bg-panel rounded-xl border border-line">
-          <span className="text-[11px] font-semibold text-muted uppercase block">Kul Freight</span>
-          <strong className="text-[17px] font-bold text-ink block mt-0.5">{formatCurrency(totalFreight)}</strong>
+          <span className="text-[11px] font-semibold text-muted uppercase block">Total Freight</span>
+          <strong className="text-[15px] sm:text-[17px] font-bold break-words text-ink block mt-0.5">{formatCurrency(totalFreight)}</strong>
         </div>
         <div className="p-3 bg-panel rounded-xl border border-positive/30 bg-positive/[0.02]">
-          <span className="text-[11px] font-semibold text-positive uppercase block">Aavyu (Received)</span>
-          <strong className="text-[17px] font-bold text-positive block mt-0.5">{formatCurrency(totalReceived)}</strong>
+          <span className="text-[11px] font-semibold text-positive uppercase block">Received</span>
+          <strong className="text-[15px] sm:text-[17px] font-bold break-words text-positive block mt-0.5">{formatCurrency(totalReceived)}</strong>
         </div>
         <div className="p-3 bg-panel rounded-xl border border-amber-300 bg-amber-500/[0.03]">
-          <span className="text-[11px] font-semibold text-amber-700 uppercase block">Baki (Pending)</span>
-          <strong className="text-[17px] font-bold text-amber-700 block mt-0.5">{formatCurrency(totalBalance)}</strong>
+          <span className="text-[11px] font-semibold text-amber-700 uppercase block">Pending Balance</span>
+          <strong className="text-[15px] sm:text-[17px] font-bold break-words text-amber-700 block mt-0.5">{formatCurrency(totalBalance)}</strong>
         </div>
         <div className="p-3 bg-panel rounded-xl border border-line">
           <span className="text-[11px] font-semibold text-muted uppercase block">Total Expense</span>
-          <strong className="text-[17px] font-bold text-negative block mt-0.5">{formatCurrency(totalExpense)}</strong>
+          <strong className="text-[15px] sm:text-[17px] font-bold break-words text-negative block mt-0.5">{formatCurrency(totalExpense)}</strong>
         </div>
         <div className="p-3 bg-panel rounded-xl border border-line">
           <span className="text-[11px] font-semibold text-muted uppercase block">Net Profit</span>
-          <strong className={`text-[17px] font-bold block mt-0.5 ${totalProfit >= 0 ? 'text-positive' : 'text-negative'}`}>
+          <strong className={`text-[15px] sm:text-[17px] font-bold break-words block mt-0.5 ${totalProfit >= 0 ? 'text-positive' : 'text-negative'}`}>
             {formatCurrency(totalProfit)}
           </strong>
         </div>
@@ -295,9 +303,9 @@ export default function TripsPage() {
                   <th className="text-left text-[13px] font-semibold text-muted px-3 py-3">Driver</th>
                   <th className="text-left text-[13px] font-semibold text-muted px-3 py-3">Party / Route</th>
                   <th className="text-right text-[13px] font-semibold text-muted px-3 py-3">Ton</th>
-                  <th className="text-right text-[13px] font-semibold text-ink px-3 py-3">Kul Freight</th>
-                  <th className="text-right text-[13px] font-semibold text-positive px-3 py-3">Aavyu (Rec.)</th>
-                  <th className="text-right text-[13px] font-semibold text-amber-700 px-3 py-3">Baki (Bal.)</th>
+                  <th className="text-right text-[13px] font-semibold text-ink px-3 py-3">Total Freight</th>
+                  <th className="text-right text-[13px] font-semibold text-positive px-3 py-3">Received</th>
+                  <th className="text-right text-[13px] font-semibold text-amber-700 px-3 py-3">Balance</th>
                   <th className="text-right text-[13px] font-semibold text-negative px-3 py-3">Expense</th>
                   <th className="text-right text-[13px] font-semibold text-muted px-3 py-3">Profit</th>
                   <th className="text-center text-[13px] font-semibold text-muted px-3 py-3">Status</th>
@@ -347,17 +355,17 @@ export default function TripsPage() {
                         {trip.ton != null ? `${trip.ton}` : '—'} {trip.unload_ton != null ? `/ ${trip.unload_ton}` : ''}
                       </td>
 
-                      {/* Kul Freight */}
+                      {/* Total Freight */}
                       <td className="px-3 py-3 text-[14px] text-right font-bold text-ink whitespace-nowrap">
                         {formatCurrency(tf)}
                       </td>
 
-                      {/* Aavyu (Received) */}
+                      {/* Received */}
                       <td className="px-3 py-3 text-[14px] text-right font-bold text-positive whitespace-nowrap bg-positive/[0.01]">
                         {formatCurrency(rec)}
                       </td>
 
-                      {/* Baki (Balance) */}
+                      {/* Balance */}
                       <td className="px-3 py-3 text-[14px] text-right font-bold whitespace-nowrap bg-amber-500/[0.01]">
                         <span className={bal > 0 ? 'text-amber-700' : 'text-muted/60'}>
                           {formatCurrency(bal)}
@@ -387,6 +395,20 @@ export default function TripsPage() {
                       {/* Actions (Update Payment & Delete) */}
                       <td className="px-4 py-3 text-center whitespace-nowrap">
                         <div className="flex items-center justify-center gap-1.5">
+                          <Link
+                            href={`/trips/new?id=${trip.id}&view=1`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="px-2 py-1 rounded text-[12px] font-semibold bg-paper text-ink border border-line hover:bg-paper/80"
+                          >
+                            View
+                          </Link>
+                          <Link
+                            href={`/trips/new?id=${trip.id}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="px-2 py-1 rounded text-[12px] font-semibold bg-primary/10 text-primary hover:bg-primary/20"
+                          >
+                            Edit
+                          </Link>
                           <button
                             type="button"
                             onClick={(e) => handleOpenPaymentModal(trip, e)}
@@ -442,9 +464,9 @@ export default function TripsPage() {
 
       {/* Quick Payment Update Modal */}
       {editingTrip && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-panel rounded-2xl border border-line shadow-2xl max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-line pb-3">
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
+          <div className="bg-panel rounded-t-2xl sm:rounded-2xl border border-line shadow-2xl max-w-md w-full max-h-[100dvh] overflow-y-auto p-4 sm:p-6 space-y-4">
+            <div className="flex items-start justify-between gap-3 border-b border-line pb-3">
               <div>
                 <h3 className="text-lg font-bold text-ink flex items-center gap-2">
                   <span>Update Payment</span>
@@ -465,8 +487,8 @@ export default function TripsPage() {
 
             {/* Total Freight Display */}
             <div className="p-3.5 rounded-xl bg-paper border border-line flex items-center justify-between">
-              <span className="text-[13px] text-muted font-medium">Kul Freight (Total):</span>
-              <span className="text-[17px] font-bold text-ink">{formatCurrency(editingTrip.total_freight)}</span>
+              <span className="text-[13px] text-muted font-medium">Total Freight:</span>
+              <span className="text-[15px] sm:text-[17px] font-bold break-words text-ink">{formatCurrency(editingTrip.total_freight)}</span>
             </div>
 
             {/* Quick action buttons */}
@@ -480,7 +502,7 @@ export default function TripsPage() {
                 }}
                 className="flex-1 py-1.5 px-2 rounded-lg border border-positive/30 bg-positive/10 text-positive text-[12px] font-bold hover:bg-positive/20 transition-colors text-center"
               >
-                ✓ Poora Aavi Gaya ({formatCurrency(editingTrip.total_freight)})
+                ✓ Fully received ({formatCurrency(editingTrip.total_freight)})
               </button>
               <button
                 type="button"
@@ -490,14 +512,14 @@ export default function TripsPage() {
                 }}
                 className="flex-1 py-1.5 px-2 rounded-lg border border-line bg-paper text-muted text-[12px] font-medium hover:bg-line transition-colors text-center"
               >
-                0 Aavyu (Poora Baki)
+                Nothing received yet (full balance due)
               </button>
             </div>
 
             {/* Input Received Amount */}
             <div className="space-y-1">
               <label className="text-[13px] font-bold text-positive flex items-center justify-between">
-                <span>Ketlu Aavyu / Received Amount (₹)</span>
+                <span>Received Amount (₹)</span>
                 <span className="text-[11px] font-normal text-muted">Enter received cash/bank</span>
               </label>
               <input
@@ -525,16 +547,16 @@ export default function TripsPage() {
 
             {/* Live Remaining Balance */}
             <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-300 flex items-center justify-between text-[14px]">
-              <span className="text-amber-800 font-semibold">Ketlu Baki Rehshe (Balance):</span>
+              <span className="text-amber-800 font-semibold">Remaining Balance:</span>
               <span className="font-extrabold text-amber-800 text-[16px]">
                 {formatCurrency(Math.max(0, (editingTrip.total_freight ?? 0) - (Number(modalReceivedAmount) || 0)))}
               </span>
             </div>
 
-            {/* Date & Account (Kema Aavyu) */}
-            <div className="grid grid-cols-2 gap-3">
+            {/* Date and account */}
+            <div className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-3">
               <div className="flex flex-col gap-1">
-                <label className="text-[13px] font-medium text-muted">Payment Date (તારીખ)</label>
+                <label className="text-[13px] font-medium text-muted">Payment Date</label>
                 <input
                   type="date"
                   value={modalDate}
@@ -543,7 +565,7 @@ export default function TripsPage() {
                 />
               </div>
               <SelectField
-                label="Kema Aavyu (ખાતું / Cash)"
+                label="Account / Cash"
                 value={modalPaymentMode}
                 onChange={(e) => setModalPaymentMode(e.target.value as PaymentMode)}
                 options={bankAccountOptions}
@@ -551,16 +573,16 @@ export default function TripsPage() {
             </div>
 
             {/* Status & UTR Ref */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-3">
               <SelectField
-                label="Payment Status (સ્થિતિ)"
+                label="Payment Status"
                 value={modalPaymentStatus}
                 onChange={(e) => setModalPaymentStatus(e.target.value as PaymentStatus)}
                 options={[
-                  { value: 'received', label: 'Received (જમા / ચૂકતે)' },
-                  { value: 'partial', label: 'Partial (અડધા જમા)' },
-                  { value: 'pending', label: 'Pending (બાકી)' },
-                  { value: 'overdue', label: 'Overdue (મુદત વીતી)' },
+                  { value: 'received', label: 'Received' },
+                  { value: 'partial', label: 'Partial' },
+                  { value: 'pending', label: 'Pending' },
+                  { value: 'overdue', label: 'Overdue' },
                 ]}
               />
               <div className="flex flex-col gap-1">

@@ -11,8 +11,10 @@ import { getLocations, saveLocation, toggleLocationActive, syncLocationsFromSupa
 import { generateUUID } from '@/lib/supabase-service';
 import type { Location } from '@/types/database';
 import { useEffect } from 'react';
+import { useToast } from '@/components/Toast';
 
 export default function LocationsPage() {
+  const toast = useToast();
   const [locations, setLocations] = useState<Location[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Location | null>(null);
@@ -61,21 +63,24 @@ export default function LocationsPage() {
     const updated = saveLocation(entry);
     setLocations(updated);
     setShowForm(false);
+    toast.success(editing ? 'Location updated' : 'Location added', { message: entry.name });
   };
 
   const toggleActive = (id: string) => {
     const updated = toggleLocationActive(id);
     setLocations(updated);
+    const location = updated.find(l => l.id === id);
+    if (location) toast.info(location.is_active ? 'Location activated' : 'Location deactivated', { message: location.name });
   };
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="relative flex-1 max-w-xs">
+        <div className="relative w-full sm:flex-1 sm:max-w-xs">
           <input type="text" placeholder="Search locations..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="7" cy="7" r="5" /><path d="M11 11l3 3" /></svg>
         </div>
-        <Button onClick={() => openForm()}>
+        <Button onClick={() => openForm()} className="w-full sm:w-auto">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>
           Add Location
         </Button>

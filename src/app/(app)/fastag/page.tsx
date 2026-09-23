@@ -13,6 +13,7 @@ import { getVehicles, syncVehiclesFromSupabase } from '@/lib/master-store';
 import { getStoredTrips, syncTripsFromSupabase } from '@/lib/trip-store';
 import { generateUUID } from '@/lib/supabase-service';
 import type { Fastag, PaymentMode, Vehicle } from '@/types/database';
+import { useToast } from '@/components/Toast';
 
 const PAYMENT_OPTIONS = [
   { value: 'upi', label: 'UPI' },
@@ -31,6 +32,7 @@ const emptyForm = (): Partial<Fastag> => ({
 });
 
 export default function FastagPage() {
+  const toast = useToast();
   const [records, setRecords] = useState<Fastag[]>([]);
   const [availableVehicles, setAvailableVehicles] = useState<Vehicle[]>([]);
   const [customVehicleMode, setCustomVehicleMode] = useState(false);
@@ -54,18 +56,14 @@ export default function FastagPage() {
     const v = getVehicles();
     setAvailableVehicles(v || []);
 
-    syncFastagFromSupabase().then(() => {
+    Promise.all([
+      syncFastagFromSupabase().catch(() => null),
+      syncTripsFromSupabase().catch(() => null),
+    ]).then(() => {
       const trips = getStoredTrips();
       if (trips.length > 0) syncFastagFromTrips(trips);
       setRecords(getStoredFastag());
-    }).catch(() => {});
-
-    syncTripsFromSupabase().then(trips => {
-      if (trips && trips.length > 0) {
-        syncFastagFromTrips(trips);
-        setRecords(getStoredFastag());
-      }
-    }).catch(() => {});
+    });
 
     syncVehiclesFromSupabase().then(remoteVehicles => {
       if (remoteVehicles && remoteVehicles.length > 0) {
@@ -90,7 +88,7 @@ export default function FastagPage() {
     if (dateFrom && r.date < dateFrom) return false;
     if (dateTo && r.date > dateTo) return false;
     return true;
-  }), [records, search, dateFrom, dateTo]);
+  }).sort((a, b) => (b.date || '').localeCompare(a.date || '')), [records, search, dateFrom, dateTo]);
 
   const totalRecharge = filtered.reduce((s, r) => s + r.recharge_amount, 0);
 
@@ -119,6 +117,7 @@ export default function FastagPage() {
     if (confirm('Are you sure you want to delete this FASTag recharge record?')) {
       const updated = deleteFastag(id);
       setRecords([...updated]);
+      toast.success('FASTag recharge deleted');
     }
   }
 
@@ -150,6 +149,9 @@ export default function FastagPage() {
     const updated = saveFastag(entry);
     setRecords([...updated]);
     setShowModal(false);
+    toast.success(editId ? 'FASTag recharge updated' : 'FASTag recharge added', {
+      message: `${entry.vehicle_no ? `${entry.vehicle_no} · ` : ''}${formatCurrency(entry.recharge_amount)}`,
+    });
   }
 
   const f = (k: keyof Fastag) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -161,7 +163,7 @@ export default function FastagPage() {
     <div className="space-y-4">
       {/* Top bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap filter-bar min-w-0 w-full">
           <SearchInput
             placeholder="Search FASTag no. or vehicle..."
             value={search}
@@ -169,18 +171,20 @@ export default function FastagPage() {
             onClear={() => setSearch('')}
             wrapperClassName="w-full sm:w-60"
           />
-          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="text-[13px]" />
-          <span className="text-muted text-[13px]">to</span>
-          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="text-[13px]" />
+          <div className="filter-inline flex items-center gap-2 w-full sm:w-auto">
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="text-[13px] min-w-0" />
+            <span className="text-muted text-[13px] shrink-0">to</span>
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="text-[13px] min-w-0" />
+          </div>
         </div>
-        <Button onClick={openAdd}>
+        <Button onClick={openAdd} className="w-full sm:w-auto">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>
           Add Recharge
         </Button>
       </div>
 
       {/* Summary */}
-      <div className="flex gap-4 text-[13px]">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px]">
         <span className="text-muted">{filtered.length} record{filtered.length !== 1 ? 's' : ''}</span>
         <span className="text-muted">•</span>
         <span>Total Recharged: <strong className="text-ink">{formatCurrency(totalRecharge)}</strong></span>
@@ -270,7 +274,7 @@ export default function FastagPage() {
             </span>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-4">
             <TextField label="Date" type="date" value={form.date ?? ''} onChange={f('date')} required />
 
             {/* Vehicle No. Dropdown from Master */}
@@ -322,7 +326,7 @@ export default function FastagPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-4">
             <TextField
               label="Recharge Amount (₹)"
               type="number"

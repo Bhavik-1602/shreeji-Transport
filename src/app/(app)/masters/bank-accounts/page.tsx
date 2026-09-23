@@ -9,8 +9,10 @@ import EmptyState from '@/components/EmptyState';
 import { getBankAccounts, saveBankAccount, deleteBankAccount, syncBankAccountsFromSupabase } from '@/lib/master-store';
 import type { BankAccount, BankAccountType } from '@/types/database';
 import { useEffect } from 'react';
+import { useToast } from '@/components/Toast';
 
 export default function BankAccountsPage() {
+  const toast = useToast();
   const [accounts, setAccounts] = useState<BankAccount[]>(() => getBankAccounts());
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<BankAccount | null>(null);
@@ -62,23 +64,25 @@ export default function BankAccountsPage() {
     const updated = saveBankAccount(entry);
     setAccounts(updated);
     setShowForm(false);
+    toast.success(editing ? 'Bank account updated' : 'Bank account added', { message: entry.label });
   };
 
   const handleDelete = (id: string, name: string) => {
     if (window.confirm(`Are you sure you want to delete bank account "${name}"?`)) {
       const updated = deleteBankAccount(id);
       setAccounts(updated);
+      toast.success('Bank account deleted', { message: name });
     }
   };
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="relative flex-1 max-w-xs">
+        <div className="relative w-full sm:flex-1 sm:max-w-xs">
           <input type="text" placeholder="Search accounts..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="7" cy="7" r="5" /><path d="M11 11l3 3" /></svg>
         </div>
-        <Button onClick={() => openForm()}>
+        <Button onClick={() => openForm()} className="w-full sm:w-auto">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>
           Add Account
         </Button>

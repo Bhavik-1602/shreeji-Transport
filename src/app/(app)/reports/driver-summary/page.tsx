@@ -12,6 +12,7 @@ import { getStoredDriverSummaries, saveDriverSummary, deleteDriverSummary, syncD
 import { getStoredTrips, syncTripsFromSupabase } from '@/lib/trip-store';
 import { generateUUID } from '@/lib/supabase-service';
 import type { DriverSummary } from '@/types/database';
+import { useToast } from '@/components/Toast';
 
 const emptyForm = (): Partial<DriverSummary> => ({
   date: new Date().toISOString().split('T')[0],
@@ -22,6 +23,7 @@ const emptyForm = (): Partial<DriverSummary> => ({
 });
 
 export default function DriverSummaryPage() {
+  const toast = useToast();
   const [records, setRecords] = useState<DriverSummary[]>([]);
   const [search, setSearch] = useState('');
   const [driverFilter, setDriverFilter] = useState('');
@@ -41,18 +43,14 @@ export default function DriverSummaryPage() {
 
     refresh();
 
-    syncDriverSummariesFromSupabase().then(() => {
+    Promise.all([
+      syncDriverSummariesFromSupabase().catch(() => null),
+      syncTripsFromSupabase().catch(() => null),
+    ]).then(() => {
       const trips = getStoredTrips();
       if (trips.length > 0) syncDriverSummariesFromTrips(trips);
       setRecords(getStoredDriverSummaries());
-    }).catch(() => {});
-
-    syncTripsFromSupabase().then(trips => {
-      if (trips && trips.length > 0) {
-        syncDriverSummariesFromTrips(trips);
-        setRecords(getStoredDriverSummaries());
-      }
-    }).catch(() => {});
+    });
 
     window.addEventListener('shreeji_operations_updated', refresh);
     window.addEventListener('shreeji_trips_updated', refresh);
@@ -77,7 +75,7 @@ export default function DriverSummaryPage() {
       if (dateFrom && r.date < dateFrom) return false;
       if (dateTo && r.date > dateTo) return false;
       return true;
-    });
+    }).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   }, [records, search, driverFilter, vehicleFilter, dateFrom, dateTo]);
 
   // Totals & aggregations
@@ -115,11 +113,15 @@ export default function DriverSummaryPage() {
     if (confirm('Are you sure you want to delete this driver silik record?')) {
       const updated = deleteDriverSummary(id);
       setRecords(updated);
+      toast.success('Silik record deleted');
     }
   }
 
   function handleSave() {
-    if (!form.date || !form.vehicle_no || !form.driver_name || form.silik_amount == null) return;
+    if (!form.date || !form.vehicle_no || !form.driver_name || form.silik_amount == null) {
+      toast.error('Some details are missing', { message: 'Please fill Date, Vehicle, Driver and Silik Amount.' });
+      return;
+    }
     const entry: DriverSummary = {
       id: editId ?? generateUUID(),
       transport_id: 'a0000000-0000-0000-0000-000000000001',
@@ -134,6 +136,9 @@ export default function DriverSummaryPage() {
     const updated = saveDriverSummary(entry);
     setRecords(updated);
     setShowModal(false);
+    toast.success(editId ? 'Silik record updated' : 'Silik record added', {
+      message: `${entry.driver_name} · ${formatCurrency(entry.silik_amount)}`,
+    });
   }
 
   const f = (k: keyof DriverSummary) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -143,7 +148,7 @@ export default function DriverSummaryPage() {
     <div className="space-y-6">
       {/* Top action & filter bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap filter-bar min-w-0 w-full">
           <SearchInput
             placeholder="Search driver, vehicle, note..."
             value={search}
@@ -155,7 +160,7 @@ export default function DriverSummaryPage() {
           <select
             value={driverFilter}
             onChange={e => setDriverFilter(e.target.value)}
-            className="text-[13px]"
+            className="text-[13px] sm:w-auto"
           >
             <option value="">All Drivers</option>
             {driverList.map(d => <option key={d} value={d}>{d}</option>)}
@@ -164,20 +169,20 @@ export default function DriverSummaryPage() {
           <select
             value={vehicleFilter}
             onChange={e => setVehicleFilter(e.target.value)}
-            className="text-[13px]"
+            className="text-[13px] sm:w-auto"
           >
             <option value="">All Vehicles</option>
             {vehicleList.map(v => <option key={v} value={v}>{v}</option>)}
           </select>
 
-          <div className="flex items-center gap-2">
-            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="text-[13px]" />
-            <span className="text-muted text-[13px]">to</span>
-            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="text-[13px]" />
+          <div className="filter-inline flex items-center gap-2 w-full sm:w-auto">
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="text-[13px] min-w-0" />
+            <span className="text-muted text-[13px] shrink-0">to</span>
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="text-[13px] min-w-0" />
           </div>
         </div>
 
-        <Button onClick={openAdd}>
+        <Button onClick={openAdd} className="w-full sm:w-auto">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
             <path d="M8 3v10M3 8h10" />
           </svg>
@@ -186,7 +191,7 @@ export default function DriverSummaryPage() {
       </div>
 
       {/* Driver Silik KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 min-[481px]:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="rounded-xl border border-line bg-panel p-4">
           <p className="text-[11px] font-semibold text-muted uppercase tracking-wider">Total Silik Paid</p>
           <p className="text-[22px] font-bold text-ink mt-1">{formatCurrency(totalSilik)}</p>
@@ -327,7 +332,7 @@ export default function DriverSummaryPage() {
         size="md"
       >
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-4">
             <TextField
               label="Date"
               type="date"
@@ -344,7 +349,7 @@ export default function DriverSummaryPage() {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-4">
             <TextField
               label="Driver Name"
               value={form.driver_name ?? ''}

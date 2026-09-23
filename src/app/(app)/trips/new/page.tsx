@@ -18,9 +18,10 @@ import {
   syncBankAccountsFromSupabase,
   getAllAccountOptions,
 } from '@/lib/master-store';
-import { saveTrip, computeUnifiedCalculations, getNextSrNumber } from '@/lib/trip-store';
+import { saveTrip, deleteTrip, computeUnifiedCalculations, getNextSrNumber, getStoredTrips, syncTripsFromSupabase, type UnifiedTrip } from '@/lib/trip-store';
 import { formatCurrency } from '@/lib/format';
 import type { PaymentMode, PaymentStatus, Vehicle, Driver, Party, Location, BankAccount } from '@/types/database';
+import { useToast } from '@/components/Toast';
 
 const SUGGESTED_LOCATIONS = [
   // Gujarat Major Transport Hubs & Plants
@@ -132,6 +133,7 @@ const SUGGESTED_PARTIES = [
 
 export default function NewTripPage() {
   const router = useRouter();
+  const toast = useToast();
 
   // Auto-Generated SR Number / Trip ID
   const [autoSrNumber, setAutoSrNumber] = useState<string>('');
@@ -186,7 +188,7 @@ export default function NewTripPage() {
   const [ratePerTon, setRatePerTon] = useState('');
   const [isManualFreight, setIsManualFreight] = useState(false);
   const [manualTotalFreight, setManualTotalFreight] = useState('');
-  const [receivedAmount, setReceivedAmount] = useState(''); // Ketlu Aavyu (₹)
+  const [receivedAmount, setReceivedAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMode>('Jaymin - HDFC');
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('pending');
   const [statusManuallyChanged, setStatusManuallyChanged] = useState(false);
@@ -213,6 +215,11 @@ export default function NewTripPage() {
   const [formErrorBanner, setFormErrorBanner] = useState<string | null>(null);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [viewMode, setViewMode] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [returnEditId, setReturnEditId] = useState<string | null>(null);
+  const [createdAt, setCreatedAt] = useState<string | null>(null);
+  const [returnCreatedAt, setReturnCreatedAt] = useState<string | null>(null);
 
   // Active master options loaded dynamically from master-store
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -221,8 +228,104 @@ export default function NewTripPage() {
   const [locations, setLocations] = useState<Location[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
 
+  const numText = (value: number | null | undefined) => (value == null ? '' : String(value));
+
+  const applyTripPair = (list: UnifiedTrip[], id: string) => {
+    const found = list.find(t => t.id === id);
+    if (!found) return;
+    const onward = found.is_return_leg && found.return_leg_for
+      ? (list.find(t => t.id === found.return_leg_for) || found)
+      : found;
+    const ret = found.is_return_leg
+      ? (onward.id === found.id ? null : found)
+      : (list.find(t => t.is_return_leg && t.return_leg_for === onward.id) || null);
+
+    const fillOnward = (trip: UnifiedTrip) => {
+      const freight = Number(trip.total_freight) || 0;
+      const autoFreight = (Number(trip.ton) || 0) * (Number(trip.rate_per_ton) || 0);
+      const manual = freight > 0 && Math.abs(freight - autoFreight) > 0.49;
+      setEditId(trip.id);
+      setCreatedAt(trip.created_at || null);
+      setAutoSrNumber(trip.sr_number || '');
+      setDate(trip.date || new Date().toISOString().slice(0, 10));
+      setVehicleNo(trip.vehicle_no || '');
+      setDriverName(trip.driver_name || '');
+      setPartyName(trip.party_name || '');
+      setLoadingFrom(trip.loading_from || '');
+      setLoadingTo(trip.loading_to || '');
+      setTon(numText(trip.ton));
+      setUnloadTon(numText(trip.unload_ton));
+      setRatePerTon(numText(trip.rate_per_ton));
+      setIsManualFreight(manual);
+      setManualTotalFreight(manual ? String(freight) : '');
+      setReceivedAmount(trip.received_amount == null ? '' : String(trip.received_amount));
+      setPaymentMethod((trip.payment_mode || 'Jaymin - HDFC') as PaymentMode);
+      setPaymentStatus(trip.payment_status || 'pending');
+      setStatusManuallyChanged(true);
+      setSilikDate(trip.silik_date || trip.date || new Date().toISOString().slice(0, 10));
+      setDriverSilik(numText(trip.driver_silik));
+      setDieselKmStart(numText(trip.diesel_km_start));
+      setDieselKmEnd(numText(trip.diesel_km_end));
+      setDieselLitres(numText(trip.diesel_litres));
+      setDieselRate(trip.diesel_rate == null ? '99.50' : String(trip.diesel_rate));
+      setToll(numText(trip.toll));
+      setOtherExpense(numText(trip.other_expense));
+      setNotes(trip.notes || '');
+    };
+
+    const fillReturn = (trip: UnifiedTrip) => {
+      const freight = Number(trip.total_freight) || 0;
+      const autoFreight = (Number(trip.ton) || 0) * (Number(trip.rate_per_ton) || 0);
+      const manual = freight > 0 && Math.abs(freight - autoFreight) > 0.49;
+      setHasReturnLeg(true);
+      setReturnEditId(trip.id);
+      setReturnCreatedAt(trip.created_at || null);
+      setReturnDate(trip.date || '');
+      setReturnDriver(trip.driver_name || '');
+      setReturnParty(trip.party_name || '');
+      setReturnFrom(trip.loading_from || '');
+      setReturnTo(trip.loading_to || '');
+      setReturnTon(numText(trip.ton));
+      setReturnUnloadTon(numText(trip.unload_ton));
+      setReturnRate(numText(trip.rate_per_ton));
+      setIsReturnManualFreight(manual);
+      setReturnManualFreight(manual ? String(freight) : '');
+      setReturnReceivedAmount(trip.received_amount == null ? '' : String(trip.received_amount));
+      setReturnPaymentMethod((trip.payment_mode || 'Jaymin - HDFC') as PaymentMode);
+      setReturnPaymentStatus(trip.payment_status || 'pending');
+      setReturnStatusManuallyChanged(true);
+      setReturnSilikDate(trip.silik_date || trip.date || '');
+      setReturnDriverSilik(numText(trip.driver_silik));
+      setReturnDieselKmStart(numText(trip.diesel_km_start));
+      setReturnDieselKmEnd(numText(trip.diesel_km_end));
+      setReturnDieselLitres(numText(trip.diesel_litres));
+      setReturnDieselRate(trip.diesel_rate == null ? '99.50' : String(trip.diesel_rate));
+      setReturnToll(numText(trip.toll));
+      setReturnOtherExpense(numText(trip.other_expense));
+      setReturnNotes(trip.notes || '');
+    };
+
+    fillOnward(onward);
+    if (ret) fillReturn(ret);
+  };
+
   useEffect(() => {
-    setAutoSrNumber(getNextSrNumber());
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('id');
+    const viewing = params.get('view') === '1';
+    setViewMode(viewing);
+
+    if (!id) {
+      setAutoSrNumber(getNextSrNumber());
+    } else {
+      applyTripPair(getStoredTrips(), id);
+    }
+
+    syncTripsFromSupabase().then((remote) => {
+      const list = remote && remote.length > 0 ? remote : getStoredTrips();
+      if (id) applyTripPair(list, id);
+      else setAutoSrNumber(getNextSrNumber());
+    }).catch(() => {});
     const v = getVehicles();
     setVehicles(v || []);
     const d = getDrivers();
@@ -255,6 +358,16 @@ export default function NewTripPage() {
 
   const activeVehicles = vehicles.filter(v => v.is_active !== false);
   const activeDrivers = drivers.filter(d => d.is_active !== false);
+
+  useEffect(() => {
+    if (!editId || !vehicleNo || vehicles.length === 0) return;
+    if (!vehicles.some(v => v.vehicle_no === vehicleNo)) setCustomVehicleMode(true);
+  }, [editId, vehicleNo, vehicles]);
+
+  useEffect(() => {
+    if (!editId || !driverName || drivers.length === 0) return;
+    if (!drivers.some(d => d.name === driverName)) setCustomDriverMode(true);
+  }, [editId, driverName, drivers]);
 
   // Bank Accounts / Payment Methods list with user-specified priority order (All 12 Accounts)
   const bankAccountOptions = useMemo(() => {
@@ -417,7 +530,10 @@ export default function NewTripPage() {
     setErrors(err);
 
     if (missing.length > 0) {
-      setFormErrorBanner(`Ye details missing ya invalid hai: ${missing.join(', ')}`);
+      setFormErrorBanner(`These details are missing or invalid: ${missing.join(', ')}`);
+      toast.error('Please check the trip details', {
+        message: missing.length > 3 ? `${missing.slice(0, 3).join(', ')} and ${missing.length - 3} more` : missing.join(', '),
+      });
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return false;
     }
@@ -426,16 +542,21 @@ export default function NewTripPage() {
     return true;
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (viewMode) return;
     if (!validate()) return;
     setSaving(true);
     setFormErrorBanner(null);
 
     try {
-      const generatedSr = autoSrNumber || getNextSrNumber();
+      await syncTripsFromSupabase().catch(() => {});
+      const generatedSr = editId ? (autoSrNumber || getNextSrNumber()) : getNextSrNumber();
+      if (!editId) setAutoSrNumber(generatedSr);
 
       // 1. Save main onward trip
       const saved = saveTrip({
+        id: editId || undefined,
+        created_at: createdAt || undefined,
         sr_number: generatedSr,
         date,
         vehicle_no: vehicleNo.trim(),
@@ -451,6 +572,7 @@ export default function NewTripPage() {
         balance_amount: computedBalance,
         silik_date: silikDate,
         driver_silik: driverSilik ? Number(driverSilik) : null,
+        silik_payment_mode: silikPaymentMode,
         payment_mode: paymentMethod,
         diesel_km_start: dieselKmStart ? Number(dieselKmStart) : null,
         diesel_km_end: dieselKmEnd ? Number(dieselKmEnd) : null,
@@ -467,8 +589,14 @@ export default function NewTripPage() {
 
       // 2. Save full Return Leg trip if enabled (with all return fields)
       // Note: Return leg shares the SAME parent sr_number (e.g. SR0001) and does not consume a new serial number.
+      if (!hasReturnLeg && returnEditId) {
+        deleteTrip(returnEditId);
+      }
+
       if (hasReturnLeg && returnFrom && returnTo) {
         saveTrip({
+          id: returnEditId || undefined,
+          created_at: returnCreatedAt || undefined,
           sr_number: generatedSr,
           date: returnDate || date,
           vehicle_no: vehicleNo.trim(),
@@ -484,6 +612,7 @@ export default function NewTripPage() {
           balance_amount: computedReturnBalance,
           silik_date: returnSilikDate,
           driver_silik: returnDriverSilik ? Number(returnDriverSilik) : null,
+          silik_payment_mode: returnSilikPaymentMode,
           payment_mode: returnPaymentMethod,
           diesel_km_start: returnDieselKmStart ? Number(returnDieselKmStart) : null,
           diesel_km_end: returnDieselKmEnd ? Number(returnDieselKmEnd) : null,
@@ -499,18 +628,21 @@ export default function NewTripPage() {
         });
       }
 
+      const verb = editId ? 'updated' : 'saved';
       const msg = hasReturnLeg
-        ? `Round trip (${saved.sr_number} Onward & Return Leg) safaltapoorvak save ho gayi!`
-        : `Trip ${saved.sr_number} safaltapoorvak save ho gayi!`;
+        ? `Round trip ${saved.sr_number} (onward and return) was ${verb} successfully.`
+        : `Trip ${saved.sr_number} was ${verb} successfully.`;
 
-      setSuccessBanner(`${msg} Trips page par jaa rahe hai...`);
+      setSuccessBanner(`${msg} Opening the trips page...`);
+      toast.success(editId ? 'Trip updated' : 'Trip saved', { message: msg, afterReload: true });
 
       setTimeout(() => {
         window.location.href = '/trips';
       }, 400);
     } catch (err) {
       console.error('Error saving trip:', err);
-      setFormErrorBanner('Trip save karne me error aayi. Kripya punah koshish kare.');
+      setFormErrorBanner('The trip could not be saved. Please try again.');
+      toast.error('Trip could not be saved', { message: 'Please try again.' });
       setSaving(false);
     }
   };
@@ -518,15 +650,19 @@ export default function NewTripPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-12">
       {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-ink">Add Trip</h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold text-ink">{viewMode ? 'View Trip' : editId ? 'Edit Trip' : 'Add Trip'}</h1>
           <p className="text-[13px] text-muted mt-0.5">
-            Record complete trip and round-trip return details with accounting.
+            {viewMode
+              ? 'Saved trip details. Fields are locked.'
+              : editId
+                ? 'Update this trip. The same SR number is kept.'
+                : 'Record complete trip and round-trip return details with accounting.'}
           </p>
         </div>
-        <Button variant="secondary" onClick={() => router.push('/trips')}>
-          Cancel
+        <Button variant="secondary" onClick={() => router.push('/trips')} className="w-full sm:w-auto">
+          {viewMode ? 'Back' : 'Cancel'}
         </Button>
       </div>
 
@@ -537,7 +673,7 @@ export default function NewTripPage() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
           <div className="flex-1">
-            <h4 className="text-[14px] font-bold">Trip Add Nahi Ho Saki — Kripya Zaroori Details Check Kare:</h4>
+            <h4 className="text-[14px] font-bold">The trip could not be saved. Please check the required details:</h4>
             <p className="text-[13px] mt-1 text-negative/90 leading-relaxed font-medium">
               {formErrorBanner}
             </p>
@@ -555,6 +691,7 @@ export default function NewTripPage() {
         </div>
       )}
 
+      <fieldset disabled={viewMode} className="space-y-6 border-0 p-0 m-0 min-w-0">
       {/* STEP 1 – Basic Trip Details (Onward Leg) */}
       <Card>
         <div className="flex items-center gap-2 mb-4">
@@ -750,17 +887,380 @@ export default function NewTripPage() {
         </div>
       </Card>
 
-      {/* STEP 2 – Return Leg (Right below Basic Trip Details, with ALL COMPLETE FIELDS) */}
-      <Card className={`transition-all duration-200 ${hasReturnLeg ? 'border-2 border-primary/50 bg-paper shadow-md' : 'border-dashed border-primary/40 bg-paper'}`}>
-        <div className="flex items-center justify-between">
+      {/* STEP 2 – Onward Freight and Payment Details */}
+      <Card>
+        <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <span className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[12px] font-bold">2</span>
+            <div>
+              <h2 className="text-base font-semibold text-ink">Onward Freight & Payment Details</h2>
+              <p className="text-[12px] text-muted">Total freight, amount received, and remaining balance</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setIsManualFreight(!isManualFreight);
+              if (!isManualFreight) {
+                setManualTotalFreight(String(computedFreight || ''));
+              }
+            }}
+            className="text-[12px] text-primary hover:underline font-medium"
+          >
+            {isManualFreight ? '← Auto calculate from Ton × Rate' : '✏️ Enter Freight Manually (Lumpsum)'}
+          </button>
+        </div>
+
+        {/* Load / Rate Inputs */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+          <TextField
+            label="Load Ton"
+            type="number"
+            step="0.01"
+            placeholder="40.07"
+            value={ton}
+            onChange={(e) => setTon(e.target.value)}
+            required={!isManualFreight}
+          />
+          <TextField
+            label="Unload Ton (optional)"
+            type="number"
+            step="0.01"
+            placeholder="40.07"
+            value={unloadTon}
+            onChange={(e) => setUnloadTon(e.target.value)}
+          />
+          <TextField
+            label="Rate / Ton (₹)"
+            type="number"
+            step="0.01"
+            placeholder="900"
+            value={ratePerTon}
+            onChange={(e) => setRatePerTon(e.target.value)}
+            required={!isManualFreight}
+          />
+        </div>
+
+        {/* Payment breakdown: total freight, received, and balance */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-paper rounded-xl border border-line mb-4">
+          {/* Total Freight Input */}
+          <div className="flex flex-col gap-1">
+            <label className="text-[13px] font-semibold text-ink flex items-center justify-between">
+              <span>Total Freight / Payment (₹)</span>
+              {isManualFreight && (
+                <span className="text-[11px] text-primary bg-primary/10 px-1.5 py-0.2 rounded font-normal">Manual</span>
+              )}
+            </label>
+            {isManualFreight ? (
+              <input
+                type="number"
+                step="1"
+                placeholder="36000"
+                value={manualTotalFreight}
+                onChange={(e) => setManualTotalFreight(e.target.value)}
+                className="px-3 py-2 rounded-lg border border-primary bg-panel text-[15px] font-bold text-ink focus:outline-none focus:ring-2 focus:ring-primary/20"
+              />
+            ) : (
+              <div className="px-3 py-2 rounded-lg border border-line bg-panel text-[16px] font-bold text-ink flex items-center justify-between">
+                <span>{formatCurrency(computedFreight)}</span>
+                <span className="text-[11px] text-muted font-normal">Auto: Ton × Rate</span>
+              </div>
+            )}
+            <span className="text-[11px] text-muted">Onward freight amount</span>
+          </div>
+
+          {/* Received amount */}
+          <div className="flex flex-col gap-1">
+            <label className="text-[13px] font-semibold text-positive flex items-center justify-between">
+              <span>Received (₹)</span>
+              <span className="text-[11px] font-normal text-muted">Enter manually</span>
+            </label>
+            <input
+              type="number"
+              step="1"
+              placeholder="e.g. 20000"
+              value={receivedAmount}
+              onChange={(e) => setReceivedAmount(e.target.value)}
+              className="px-3 py-2 rounded-lg border border-positive/40 bg-panel text-[16px] font-bold text-positive placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-positive/20"
+            />
+            <span className="text-[11px] text-muted">Jitna payment party se receive ho gaya</span>
+          </div>
+
+          {/* Remaining balance */}
+          <div className="flex flex-col gap-1">
+            <label className="text-[13px] font-semibold text-amber-700 flex items-center justify-between">
+              <span>Balance (₹)</span>
+              <span className="text-[11px] font-normal text-muted">Auto computed</span>
+            </label>
+            <div className={`px-3 py-2 rounded-lg border flex items-center justify-between text-[16px] font-extrabold ${
+              computedBalance > 0 ? 'border-amber-400/50 bg-amber-500/10 text-amber-800' : 'border-line bg-panel text-positive'
+            }`}>
+              <span>{formatCurrency(computedBalance)}</span>
+              <span className="text-[11px] font-medium">
+                {computedBalance === 0 && computedFreight > 0 ? '✓ Paid Full' : 'Pending'}
+              </span>
+            </div>
+            <span className="text-[11px] text-muted">Total Freight − Received Amount</span>
+          </div>
+        </div>
+
+        {/* Payment Method & Status */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <SelectField
+            label="Payment Method / Bank Account"
+            value={paymentMethod}
+            onChange={(e) => setPaymentMethod(e.target.value as PaymentMode)}
+            options={bankAccountOptions}
+          />
+          <SelectField
+            label="Freight Payment Status"
+            value={paymentStatus}
+            onChange={(e) => {
+              setStatusManuallyChanged(true);
+              setPaymentStatus(e.target.value as PaymentStatus);
+            }}
+            options={[
+              { value: 'pending', label: 'Pending (nothing received)' },
+              { value: 'partial', label: 'Partial (some amount received)' },
+              { value: 'received', label: 'Received (paid in full)' },
+              { value: 'overdue', label: 'Overdue (Payment Delay)' },
+            ]}
+          />
+        </div>
+      </Card>
+
+      {/* STEP 3 – Onward Driver / Silik Details */}
+      <Card>
+        <div className="flex items-center gap-2 mb-4">
+          <span className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[12px] font-bold">3</span>
+          <h2 className="text-base font-semibold text-ink">Onward Driver / Silik Details</h2>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <TextField
+            label="Silik Date"
+            type="date"
+            value={silikDate}
+            onChange={(e) => setSilikDate(e.target.value)}
+          />
+          <TextField
+            label="Driver Silik / Advance (₹)"
+            type="number"
+            placeholder="3600"
+            value={driverSilik}
+            onChange={(e) => setDriverSilik(e.target.value)}
+          />
+          <SelectField
+            label="Silik Payment Mode"
+            value={silikPaymentMode}
+            onChange={(e) => setSilikPaymentMode(e.target.value as PaymentMode)}
+            options={bankAccountOptions}
+          />
+        </div>
+      </Card>
+
+      {/* STEP 4 – Onward Diesel Details */}
+      <Card>
+        <div className="flex items-center gap-2 mb-4">
+          <span className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[12px] font-bold">4</span>
+          <h2 className="text-base font-semibold text-ink">Onward Diesel Details</h2>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <TextField
+            label="Diesel KM Start"
+            type="number"
+            placeholder="2612"
+            value={dieselKmStart}
+            onChange={(e) => setDieselKmStart(e.target.value)}
+          />
+          <TextField
+            label="Diesel KM End"
+            type="number"
+            placeholder="3200"
+            value={dieselKmEnd}
+            onChange={(e) => {
+              setDieselKmEnd(e.target.value);
+              if (hasReturnLeg && !returnDieselKmStart) setReturnDieselKmStart(e.target.value);
+            }}
+            error={errors.dieselKmEnd}
+          />
+          <TextField
+            label="Diesel Litres"
+            type="number"
+            step="0.01"
+            placeholder="207"
+            value={dieselLitres}
+            onChange={(e) => setDieselLitres(e.target.value)}
+          />
+          <TextField
+            label="Diesel Rate (₹/L)"
+            type="number"
+            step="0.01"
+            placeholder="99.50"
+            value={dieselRate}
+            onChange={(e) => setDieselRate(e.target.value)}
+          />
+        </div>
+        <div className="mt-4 grid grid-cols-1 min-[481px]:grid-cols-3 gap-3 p-3 bg-paper rounded-lg border border-line text-[13px]">
+          <div>
+            <span className="text-muted block text-[11px] uppercase">Total KM</span>
+            <strong className="text-ink text-[14px]">{computed.total_km > 0 ? `${computed.total_km} km` : '—'}</strong>
+          </div>
+          <div>
+            <span className="text-muted block text-[11px] uppercase">Average KM/L</span>
+            <strong className="text-ink text-[14px]">{computed.average_kmpl > 0 ? `${computed.average_kmpl} km/l` : '—'}</strong>
+          </div>
+          <div>
+            <span className="text-muted block text-[11px] uppercase">Diesel Cost (₹)</span>
+            <strong className="text-negative text-[14px]">{formatCurrency(computed.diesel_cost)}</strong>
+          </div>
+        </div>
+      </Card>
+
+      {/* STEP 5 – Onward Toll / Fastag / Other Expenses */}
+      <Card>
+        <div className="flex items-center gap-2 mb-4">
+          <span className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[12px] font-bold">5</span>
+          <h2 className="text-base font-semibold text-ink">Onward Toll / Fastag / Other Expenses</h2>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <TextField
+            label="Toll / FASTag (₹)"
+            type="number"
+            placeholder="3235"
+            value={toll}
+            onChange={(e) => setToll(e.target.value)}
+          />
+          <TextField
+            label="Other Expense (₹)"
+            type="number"
+            placeholder="0"
+            value={otherExpense}
+            onChange={(e) => setOtherExpense(e.target.value)}
+          />
+        </div>
+      </Card>
+
+      {/* STEP 6 – Total Accounting Summary & Net Profit */}
+      <Card className="border-primary/40 bg-primary/[0.02]">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <span className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-[12px] font-bold">6</span>
+            <h2 className="text-base font-bold text-primary flex items-center gap-2">
+              Trip Accounting Summary
+              <span className="text-[11px] font-normal px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20">Live Calculation</span>
+            </h2>
+          </div>
+          {hasReturnLeg && (
+            <span className="text-[12px] font-bold text-primary px-2.5 py-1 rounded-lg bg-primary/10 border border-primary/25">
+              Round Trip (Onward + Return)
+            </span>
+          )}
+        </div>
+
+        {/* If Return Leg is active, show both individual legs + round trip combined */}
+        {hasReturnLeg && combinedStats ? (
+          <div className="space-y-3">
+            {/* Overall Round Trip Highlight */}
+            <div className="grid grid-cols-1 min-[481px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 p-3.5 bg-panel rounded-xl border-2 border-primary/30 shadow-xs">
+              <div>
+                <p className="text-[11px] font-bold text-muted uppercase">Round Trip Freight</p>
+                <p className="text-[17px] font-black text-ink mt-0.5">{formatCurrency(combinedStats.roundFreight)}</p>
+              </div>
+              <div>
+                <p className="text-[11px] font-bold text-positive uppercase">Round Trip Received</p>
+                <p className="text-[17px] font-black text-positive mt-0.5">{formatCurrency(combinedStats.roundReceived)}</p>
+              </div>
+              <div>
+                <p className="text-[11px] font-bold text-amber-700 uppercase">Round Trip Balance</p>
+                <p className="text-[17px] font-black text-amber-700 mt-0.5">{formatCurrency(combinedStats.roundBalance)}</p>
+              </div>
+              <div>
+                <p className="text-[11px] font-bold text-negative uppercase">Total Expenses</p>
+                <p className="text-[17px] font-black text-negative mt-0.5">{formatCurrency(combinedStats.roundExpense)}</p>
+              </div>
+              <div>
+                <p className="text-[11px] font-bold text-primary uppercase">Total Net Profit</p>
+                <p className={`text-[17px] font-black mt-0.5 ${combinedStats.roundProfit >= 0 ? 'text-positive' : 'text-negative'}`}>
+                  {formatCurrency(combinedStats.roundProfit)}
+                </p>
+              </div>
+            </div>
+
+            {/* Split row breakdown */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[12px]">
+              <div className="p-3 bg-paper rounded-lg border border-line">
+                <span className="font-bold text-ink block mb-1">Onward Leg:</span>
+                <span className="text-muted">Freight: </span><strong>{formatCurrency(computedFreight)}</strong> | 
+                <span className="text-positive"> Received: </span><strong>{formatCurrency(computedReceived)}</strong> | 
+                <span className="text-amber-700"> Balance: </span><strong>{formatCurrency(computedBalance)}</strong> | 
+                <span className="text-muted"> Profit: </span><strong className={computed.profit >= 0 ? 'text-positive' : 'text-negative'}>{formatCurrency(computed.profit)}</strong>
+              </div>
+              <div className="p-3 bg-paper rounded-lg border border-line">
+                <span className="font-bold text-ink block mb-1">Return Leg:</span>
+                <span className="text-muted">Freight: </span><strong>{formatCurrency(computedReturnFreight)}</strong> | 
+                <span className="text-positive"> Received: </span><strong>{formatCurrency(computedReturnReceived)}</strong> | 
+                <span className="text-amber-700"> Balance: </span><strong>{formatCurrency(computedReturnBalance)}</strong> | 
+                <span className="text-muted"> Profit: </span><strong className={returnComputed.profit >= 0 ? 'text-positive' : 'text-negative'}>{formatCurrency(returnComputed.profit)}</strong>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 min-[481px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="p-3 bg-panel rounded-xl border border-line">
+              <p className="text-[11px] font-semibold text-muted uppercase">Total Freight</p>
+              <p className="text-[16px] font-bold text-ink mt-1">{formatCurrency(computedFreight)}</p>
+            </div>
+            <div className="p-3 bg-panel rounded-xl border border-positive/30">
+              <p className="text-[11px] font-semibold text-positive uppercase">Received</p>
+              <p className="text-[16px] font-bold text-positive mt-1">{formatCurrency(computedReceived)}</p>
+            </div>
+            <div className="p-3 bg-panel rounded-xl border border-amber-300">
+              <p className="text-[11px] font-semibold text-amber-700 uppercase">Balance</p>
+              <p className="text-[16px] font-bold text-amber-700 mt-1">{formatCurrency(computedBalance)}</p>
+            </div>
+            <div className="p-3 bg-panel rounded-xl border border-line">
+              <p className="text-[11px] font-semibold text-muted uppercase">Diesel Cost</p>
+              <p className="text-[16px] font-bold text-negative mt-1">{formatCurrency(computed.diesel_cost)}</p>
+            </div>
+            <div className="p-3 bg-panel rounded-xl border border-line">
+              <p className="text-[11px] font-semibold text-muted uppercase">Total Expense</p>
+              <p className="text-[16px] font-bold text-negative mt-1">{formatCurrency(computed.total_expense)}</p>
+            </div>
+            <div className="p-3 bg-panel rounded-xl border border-line">
+              <p className="text-[11px] font-semibold text-muted uppercase">Net Profit</p>
+              <p className={`text-[16px] font-bold mt-1 ${computed.profit >= 0 ? 'text-positive' : 'text-negative'}`}>
+                {formatCurrency(computed.profit)}
+              </p>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* STEP 7 – Notes */}
+      <Card>
+        <div className="flex items-center gap-2 mb-4">
+          <span className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[12px] font-bold">7</span>
+          <h2 className="text-base font-semibold text-ink">Trip Notes</h2>
+        </div>
+        <TextareaField
+          label="Trip Notes (optional)"
+          placeholder="Any instructions, loading notes or remarks..."
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+        />
+      </Card>
+
+      {/* STEP 8 – Return Leg / Return Trip */}
+      <Card className={`transition-all duration-200 ${hasReturnLeg ? 'border-2 border-primary/50 bg-paper shadow-md' : 'border-dashed border-primary/40 bg-paper'}`}>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[12px] font-bold shrink-0">8</span>
             <div>
               <h2 className="text-base font-semibold text-ink flex items-center gap-2">
                 Return Leg / Return Trip
                 {hasReturnLeg ? (
                   <span className="text-[11px] font-bold bg-primary text-white px-2 py-0.5 rounded-full shadow-xs">
-                    Complete Return Hisab Active
+                    Return trip included
                   </span>
                 ) : (
                   <span className="text-[11px] font-medium bg-paper border border-line text-muted px-2 py-0.5 rounded-full">
@@ -768,7 +1268,7 @@ export default function NewTripPage() {
                   </span>
                 )}
               </h2>
-              <p className="text-[12px] text-muted">Aavti vakhte return trip no complete hisab (Route, Freight, Aavyu/Baki, Silik, Diesel, Expenses)</p>
+              <p className="text-[12px] text-muted">Optional return trip: route, freight, received amount, balance, driver advance, diesel, and expenses</p>
             </div>
           </div>
           <Button
@@ -852,12 +1352,12 @@ export default function NewTripPage() {
               </div>
             </div>
 
-            {/* 2.2 Return Freight & Payment (Total Freight, Ketlu Aavyu, Ketlu Baki) */}
+            {/* Return freight and payment */}
             <div className="p-4 rounded-xl bg-panel border border-line space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-[14px] font-bold text-ink flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-positive" />
-                  Return Freight & Payment (Aavyu / Baki)
+                  Return Freight and Payment
                 </h3>
                 <button
                   type="button"
@@ -900,7 +1400,7 @@ export default function NewTripPage() {
                 />
               </div>
 
-              {/* Return Payment Breakdown: Total Freight, Aavyu, Baki */}
+              {/* Return payment breakdown */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3 bg-paper rounded-lg border border-line">
                 <div className="flex flex-col gap-1">
                   <label className="text-[12px] font-semibold text-ink">Return Total Freight (₹)</label>
@@ -921,7 +1421,7 @@ export default function NewTripPage() {
                 </div>
 
                 <div className="flex flex-col gap-1">
-                  <label className="text-[12px] font-semibold text-positive">Return Ketlu Aavyu (₹)</label>
+                  <label className="text-[12px] font-semibold text-positive">Return Received (₹)</label>
                   <input
                     type="number"
                     step="1"
@@ -933,7 +1433,7 @@ export default function NewTripPage() {
                 </div>
 
                 <div className="flex flex-col gap-1">
-                  <label className="text-[12px] font-semibold text-amber-700">Return Ketlu Baki (₹)</label>
+                  <label className="text-[12px] font-semibold text-amber-700">Return Balance (₹)</label>
                   <div className={`px-3 py-1.5 rounded-lg border font-bold text-[15px] flex items-center justify-between ${
                     computedReturnBalance > 0 ? 'border-amber-300 bg-amber-500/10 text-amber-800' : 'border-line bg-panel text-positive'
                   }`}>
@@ -958,7 +1458,7 @@ export default function NewTripPage() {
                     setReturnPaymentStatus(e.target.value as PaymentStatus);
                   }}
                   options={[
-                    { value: 'pending', label: 'Pending (Baki)' },
+                    { value: 'pending', label: 'Pending' },
                     { value: 'partial', label: 'Partial' },
                     { value: 'received', label: 'Received (Paid)' },
                     { value: 'overdue', label: 'Overdue' },
@@ -972,7 +1472,7 @@ export default function NewTripPage() {
               {/* Return Driver Silik */}
               <div className="p-3.5 rounded-xl bg-panel border border-line space-y-3">
                 <h4 className="text-[13px] font-bold text-ink">Return Driver Silik / Advance</h4>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-3">
                   <TextField
                     label="Silik Date"
                     type="date"
@@ -998,7 +1498,7 @@ export default function NewTripPage() {
               {/* Return Toll & Other Expense */}
               <div className="p-3.5 rounded-xl bg-panel border border-line space-y-3">
                 <h4 className="text-[13px] font-bold text-ink">Return Toll & Other Expenses</h4>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-3">
                   <TextField
                     label="Return Toll (₹)"
                     type="number"
@@ -1026,7 +1526,7 @@ export default function NewTripPage() {
             {/* 2.4 Return Diesel */}
             <div className="p-3.5 rounded-xl bg-panel border border-line space-y-3">
               <h4 className="text-[13px] font-bold text-ink">Return Diesel Details (Optional if filled on return)</h4>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 min-[481px]:grid-cols-2 lg:grid-cols-4 gap-3">
                 <TextField
                   label="Return KM Start"
                   type="number"
@@ -1058,7 +1558,7 @@ export default function NewTripPage() {
                   onChange={(e) => setReturnDieselRate(e.target.value)}
                 />
               </div>
-              <div className="grid grid-cols-3 gap-3 p-2.5 bg-paper rounded-lg border border-line text-[12px]">
+              <div className="grid grid-cols-1 min-[481px]:grid-cols-3 gap-3 p-2.5 bg-paper rounded-lg border border-line text-[12px]">
                 <div>
                   <span className="text-muted block text-[10px] uppercase">Return Total KM</span>
                   <strong className="text-ink">{returnComputed.total_km > 0 ? `${returnComputed.total_km} km` : '—'}</strong>
@@ -1081,11 +1581,11 @@ export default function NewTripPage() {
                 <strong className="text-ink font-bold text-[15px]">{formatCurrency(computedReturnFreight)}</strong>
               </div>
               <div>
-                <span className="text-[11px] font-semibold text-positive uppercase block">Return Aavyu</span>
+                <span className="text-[11px] font-semibold text-positive uppercase block">Return Received</span>
                 <strong className="text-positive font-bold text-[15px]">{formatCurrency(computedReturnReceived)}</strong>
               </div>
               <div>
-                <span className="text-[11px] font-semibold text-amber-700 uppercase block">Return Baki</span>
+                <span className="text-[11px] font-semibold text-amber-700 uppercase block">Return Balance</span>
                 <strong className="text-amber-700 font-bold text-[15px]">{formatCurrency(computedReturnBalance)}</strong>
               </div>
               <div>
@@ -1103,368 +1603,12 @@ export default function NewTripPage() {
         )}
       </Card>
 
-      {/* STEP 3 – Onward Freight & Payment Details (With Total Freight, Ketlu Aavyu, Ketlu Baki) */}
-      <Card>
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <span className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[12px] font-bold">3</span>
-            <div>
-              <h2 className="text-base font-semibold text-ink">Onward Freight & Payment Details</h2>
-              <p className="text-[12px] text-muted">Total Freight, Ketlu Aavyu (Received) and Ketlu Baki (Balance)</p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setIsManualFreight(!isManualFreight);
-              if (!isManualFreight) {
-                setManualTotalFreight(String(computedFreight || ''));
-              }
-            }}
-            className="text-[12px] text-primary hover:underline font-medium"
-          >
-            {isManualFreight ? '← Auto calculate from Ton × Rate' : '✏️ Enter Freight Manually (Lumpsum)'}
-          </button>
-        </div>
 
-        {/* Load / Rate Inputs */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-          <TextField
-            label="Load Ton"
-            type="number"
-            step="0.01"
-            placeholder="40.07"
-            value={ton}
-            onChange={(e) => setTon(e.target.value)}
-            required={!isManualFreight}
-          />
-          <TextField
-            label="Unload Ton (optional)"
-            type="number"
-            step="0.01"
-            placeholder="40.07"
-            value={unloadTon}
-            onChange={(e) => setUnloadTon(e.target.value)}
-          />
-          <TextField
-            label="Rate / Ton (₹)"
-            type="number"
-            step="0.01"
-            placeholder="900"
-            value={ratePerTon}
-            onChange={(e) => setRatePerTon(e.target.value)}
-            required={!isManualFreight}
-          />
-        </div>
-
-        {/* Payment Breakdown Cards: Total Freight, Ketlu Aavyu, Ketlu Baki */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-paper rounded-xl border border-line mb-4">
-          {/* Total Freight Input */}
-          <div className="flex flex-col gap-1">
-            <label className="text-[13px] font-semibold text-ink flex items-center justify-between">
-              <span>Total Freight / Payment (₹)</span>
-              {isManualFreight && (
-                <span className="text-[11px] text-primary bg-primary/10 px-1.5 py-0.2 rounded font-normal">Manual</span>
-              )}
-            </label>
-            {isManualFreight ? (
-              <input
-                type="number"
-                step="1"
-                placeholder="36000"
-                value={manualTotalFreight}
-                onChange={(e) => setManualTotalFreight(e.target.value)}
-                className="px-3 py-2 rounded-lg border border-primary bg-panel text-[15px] font-bold text-ink focus:outline-none focus:ring-2 focus:ring-primary/20"
-              />
-            ) : (
-              <div className="px-3 py-2 rounded-lg border border-line bg-panel text-[16px] font-bold text-ink flex items-center justify-between">
-                <span>{formatCurrency(computedFreight)}</span>
-                <span className="text-[11px] text-muted font-normal">Auto: Ton × Rate</span>
-              </div>
-            )}
-            <span className="text-[11px] text-muted">Kul onward freight amount</span>
-          </div>
-
-          {/* Ketlu Aavyu (Received Amount) */}
-          <div className="flex flex-col gap-1">
-            <label className="text-[13px] font-semibold text-positive flex items-center justify-between">
-              <span>Ketlu Aavyu / Received (₹)</span>
-              <span className="text-[11px] font-normal text-muted">Enter manually</span>
-            </label>
-            <input
-              type="number"
-              step="1"
-              placeholder="e.g. 20000"
-              value={receivedAmount}
-              onChange={(e) => setReceivedAmount(e.target.value)}
-              className="px-3 py-2 rounded-lg border border-positive/40 bg-panel text-[16px] font-bold text-positive placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-positive/20"
-            />
-            <span className="text-[11px] text-muted">Jitna payment party se receive ho gaya</span>
-          </div>
-
-          {/* Ketlu Baki (Remaining Balance) */}
-          <div className="flex flex-col gap-1">
-            <label className="text-[13px] font-semibold text-amber-700 flex items-center justify-between">
-              <span>Ketlu Baki / Balance (₹)</span>
-              <span className="text-[11px] font-normal text-muted">Auto computed</span>
-            </label>
-            <div className={`px-3 py-2 rounded-lg border flex items-center justify-between text-[16px] font-extrabold ${
-              computedBalance > 0 ? 'border-amber-400/50 bg-amber-500/10 text-amber-800' : 'border-line bg-panel text-positive'
-            }`}>
-              <span>{formatCurrency(computedBalance)}</span>
-              <span className="text-[11px] font-medium">
-                {computedBalance === 0 && computedFreight > 0 ? '✓ Paid Full' : 'Pending'}
-              </span>
-            </div>
-            <span className="text-[11px] text-muted">Total Freight − Received Amount</span>
-          </div>
-        </div>
-
-        {/* Payment Method & Status */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <SelectField
-            label="Payment Method / Bank Account"
-            value={paymentMethod}
-            onChange={(e) => setPaymentMethod(e.target.value as PaymentMode)}
-            options={bankAccountOptions}
-          />
-          <SelectField
-            label="Freight Payment Status"
-            value={paymentStatus}
-            onChange={(e) => {
-              setStatusManuallyChanged(true);
-              setPaymentStatus(e.target.value as PaymentStatus);
-            }}
-            options={[
-              { value: 'pending', label: 'Pending (Poora Baki)' },
-              { value: 'partial', label: 'Partial (Kuchh Aavyu, Kuchh Baki)' },
-              { value: 'received', label: 'Received (Poora Aavyu)' },
-              { value: 'overdue', label: 'Overdue (Payment Delay)' },
-            ]}
-          />
-        </div>
-      </Card>
-
-      {/* STEP 4 – Onward Driver / Silik Details */}
-      <Card>
-        <div className="flex items-center gap-2 mb-4">
-          <span className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[12px] font-bold">4</span>
-          <h2 className="text-base font-semibold text-ink">Onward Driver / Silik Details</h2>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <TextField
-            label="Silik Date"
-            type="date"
-            value={silikDate}
-            onChange={(e) => setSilikDate(e.target.value)}
-          />
-          <TextField
-            label="Driver Silik / Advance (₹)"
-            type="number"
-            placeholder="3600"
-            value={driverSilik}
-            onChange={(e) => setDriverSilik(e.target.value)}
-          />
-          <SelectField
-            label="Silik Payment Mode"
-            value={silikPaymentMode}
-            onChange={(e) => setSilikPaymentMode(e.target.value as PaymentMode)}
-            options={bankAccountOptions}
-          />
-        </div>
-      </Card>
-
-      {/* STEP 5 – Onward Diesel Details */}
-      <Card>
-        <div className="flex items-center gap-2 mb-4">
-          <span className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[12px] font-bold">5</span>
-          <h2 className="text-base font-semibold text-ink">Onward Diesel Details</h2>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <TextField
-            label="Diesel KM Start"
-            type="number"
-            placeholder="2612"
-            value={dieselKmStart}
-            onChange={(e) => setDieselKmStart(e.target.value)}
-          />
-          <TextField
-            label="Diesel KM End"
-            type="number"
-            placeholder="3200"
-            value={dieselKmEnd}
-            onChange={(e) => {
-              setDieselKmEnd(e.target.value);
-              if (hasReturnLeg && !returnDieselKmStart) setReturnDieselKmStart(e.target.value);
-            }}
-            error={errors.dieselKmEnd}
-          />
-          <TextField
-            label="Diesel Litres"
-            type="number"
-            step="0.01"
-            placeholder="207"
-            value={dieselLitres}
-            onChange={(e) => setDieselLitres(e.target.value)}
-          />
-          <TextField
-            label="Diesel Rate (₹/L)"
-            type="number"
-            step="0.01"
-            placeholder="99.50"
-            value={dieselRate}
-            onChange={(e) => setDieselRate(e.target.value)}
-          />
-        </div>
-        <div className="mt-4 grid grid-cols-3 gap-3 p-3 bg-paper rounded-lg border border-line text-[13px]">
-          <div>
-            <span className="text-muted block text-[11px] uppercase">Total KM</span>
-            <strong className="text-ink text-[14px]">{computed.total_km > 0 ? `${computed.total_km} km` : '—'}</strong>
-          </div>
-          <div>
-            <span className="text-muted block text-[11px] uppercase">Average KM/L</span>
-            <strong className="text-ink text-[14px]">{computed.average_kmpl > 0 ? `${computed.average_kmpl} km/l` : '—'}</strong>
-          </div>
-          <div>
-            <span className="text-muted block text-[11px] uppercase">Diesel Cost (₹)</span>
-            <strong className="text-negative text-[14px]">{formatCurrency(computed.diesel_cost)}</strong>
-          </div>
-        </div>
-      </Card>
-
-      {/* STEP 6 – Onward Toll / Fastag / Other Expenses */}
-      <Card>
-        <div className="flex items-center gap-2 mb-4">
-          <span className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[12px] font-bold">6</span>
-          <h2 className="text-base font-semibold text-ink">Onward Toll / Fastag / Other Expenses</h2>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <TextField
-            label="Toll / FASTag (₹)"
-            type="number"
-            placeholder="3235"
-            value={toll}
-            onChange={(e) => setToll(e.target.value)}
-          />
-          <TextField
-            label="Other Expense (₹)"
-            type="number"
-            placeholder="0"
-            value={otherExpense}
-            onChange={(e) => setOtherExpense(e.target.value)}
-          />
-        </div>
-      </Card>
-
-      {/* STEP 7 – Total Accounting Summary & Net Profit */}
-      <Card className="border-primary/40 bg-primary/[0.02]">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <span className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-[12px] font-bold">7</span>
-            <h2 className="text-base font-bold text-primary flex items-center gap-2">
-              Trip Accounting Summary
-              <span className="text-[11px] font-normal px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20">Live Calculation</span>
-            </h2>
-          </div>
-          {hasReturnLeg && (
-            <span className="text-[12px] font-bold text-primary px-2.5 py-1 rounded-lg bg-primary/10 border border-primary/25">
-              Round Trip (Onward + Return)
-            </span>
-          )}
-        </div>
-
-        {/* If Return Leg is active, show both individual legs + round trip combined */}
-        {hasReturnLeg && combinedStats ? (
-          <div className="space-y-3">
-            {/* Overall Round Trip Highlight */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 p-3.5 bg-panel rounded-xl border-2 border-primary/30 shadow-xs">
-              <div>
-                <p className="text-[11px] font-bold text-muted uppercase">Round Trip Freight</p>
-                <p className="text-[17px] font-black text-ink mt-0.5">{formatCurrency(combinedStats.roundFreight)}</p>
-              </div>
-              <div>
-                <p className="text-[11px] font-bold text-positive uppercase">Round Trip Aavyu</p>
-                <p className="text-[17px] font-black text-positive mt-0.5">{formatCurrency(combinedStats.roundReceived)}</p>
-              </div>
-              <div>
-                <p className="text-[11px] font-bold text-amber-700 uppercase">Round Trip Baki</p>
-                <p className="text-[17px] font-black text-amber-700 mt-0.5">{formatCurrency(combinedStats.roundBalance)}</p>
-              </div>
-              <div>
-                <p className="text-[11px] font-bold text-negative uppercase">Total Expenses</p>
-                <p className="text-[17px] font-black text-negative mt-0.5">{formatCurrency(combinedStats.roundExpense)}</p>
-              </div>
-              <div>
-                <p className="text-[11px] font-bold text-primary uppercase">Total Net Profit</p>
-                <p className={`text-[17px] font-black mt-0.5 ${combinedStats.roundProfit >= 0 ? 'text-positive' : 'text-negative'}`}>
-                  {formatCurrency(combinedStats.roundProfit)}
-                </p>
-              </div>
-            </div>
-
-            {/* Split row breakdown */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[12px]">
-              <div className="p-3 bg-paper rounded-lg border border-line">
-                <span className="font-bold text-ink block mb-1">Onward Leg:</span>
-                <span className="text-muted">Freight: </span><strong>{formatCurrency(computedFreight)}</strong> | 
-                <span className="text-positive"> Aavyu: </span><strong>{formatCurrency(computedReceived)}</strong> | 
-                <span className="text-amber-700"> Baki: </span><strong>{formatCurrency(computedBalance)}</strong> | 
-                <span className="text-muted"> Profit: </span><strong className={computed.profit >= 0 ? 'text-positive' : 'text-negative'}>{formatCurrency(computed.profit)}</strong>
-              </div>
-              <div className="p-3 bg-paper rounded-lg border border-line">
-                <span className="font-bold text-ink block mb-1">Return Leg:</span>
-                <span className="text-muted">Freight: </span><strong>{formatCurrency(computedReturnFreight)}</strong> | 
-                <span className="text-positive"> Aavyu: </span><strong>{formatCurrency(computedReturnReceived)}</strong> | 
-                <span className="text-amber-700"> Baki: </span><strong>{formatCurrency(computedReturnBalance)}</strong> | 
-                <span className="text-muted"> Profit: </span><strong className={returnComputed.profit >= 0 ? 'text-positive' : 'text-negative'}>{formatCurrency(returnComputed.profit)}</strong>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            <div className="p-3 bg-panel rounded-xl border border-line">
-              <p className="text-[11px] font-semibold text-muted uppercase">Total Freight</p>
-              <p className="text-[16px] font-bold text-ink mt-1">{formatCurrency(computedFreight)}</p>
-            </div>
-            <div className="p-3 bg-panel rounded-xl border border-positive/30">
-              <p className="text-[11px] font-semibold text-positive uppercase">Aavyu (Received)</p>
-              <p className="text-[16px] font-bold text-positive mt-1">{formatCurrency(computedReceived)}</p>
-            </div>
-            <div className="p-3 bg-panel rounded-xl border border-amber-300">
-              <p className="text-[11px] font-semibold text-amber-700 uppercase">Baki (Balance)</p>
-              <p className="text-[16px] font-bold text-amber-700 mt-1">{formatCurrency(computedBalance)}</p>
-            </div>
-            <div className="p-3 bg-panel rounded-xl border border-line">
-              <p className="text-[11px] font-semibold text-muted uppercase">Diesel Cost</p>
-              <p className="text-[16px] font-bold text-negative mt-1">{formatCurrency(computed.diesel_cost)}</p>
-            </div>
-            <div className="p-3 bg-panel rounded-xl border border-line">
-              <p className="text-[11px] font-semibold text-muted uppercase">Total Expense</p>
-              <p className="text-[16px] font-bold text-negative mt-1">{formatCurrency(computed.total_expense)}</p>
-            </div>
-            <div className="p-3 bg-panel rounded-xl border border-line">
-              <p className="text-[11px] font-semibold text-muted uppercase">Net Profit</p>
-              <p className={`text-[16px] font-bold mt-1 ${computed.profit >= 0 ? 'text-positive' : 'text-negative'}`}>
-                {formatCurrency(computed.profit)}
-              </p>
-            </div>
-          </div>
-        )}
-      </Card>
-
-      {/* Notes */}
-      <Card>
-        <TextareaField
-          label="Trip Notes (optional)"
-          placeholder="Any instructions, loading notes or remarks..."
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-        />
-      </Card>
+      </fieldset>
 
       {/* Bottom Feedback Banner */}
       {formErrorBanner && (
-        <div className="p-3.5 rounded-xl bg-negative/10 border border-negative/30 text-negative flex items-center justify-between gap-3 text-[13px] font-semibold">
+        <div className="p-3.5 rounded-xl bg-negative/10 border border-negative/30 text-negative flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-[13px] font-semibold">
           <div className="flex items-center gap-2">
             <span>⚠️</span>
             <span>{formErrorBanner}</span>
@@ -1487,13 +1631,19 @@ export default function NewTripPage() {
       )}
 
       {/* Save Action Buttons */}
-      <div className="flex items-center justify-between pt-2">
-        <Button variant="secondary" onClick={() => router.push('/trips')}>
-          Cancel
+      <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3 pt-2">
+        <Button variant="secondary" onClick={() => router.push('/trips')} className="w-full sm:w-auto">
+          {viewMode ? 'Back' : 'Cancel'}
         </Button>
-        <Button onClick={handleSave} loading={saving} size="lg">
-          {saving ? 'Saving Trip...' : hasReturnLeg ? 'Save Round Trip (Onward + Return)' : 'Save Trip'}
-        </Button>
+        {!viewMode && (
+          <Button onClick={handleSave} loading={saving} size="lg" className="w-full sm:w-auto">
+            {saving
+              ? 'Saving Trip...'
+              : editId
+                ? (hasReturnLeg ? 'Update Round Trip (Onward + Return)' : 'Update Trip')
+                : (hasReturnLeg ? 'Save Round Trip (Onward + Return)' : 'Save Trip')}
+          </Button>
+        )}
       </div>
 
       {/* Autocomplete Datalists for Location & Party suggestions */}

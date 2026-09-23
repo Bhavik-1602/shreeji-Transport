@@ -13,8 +13,10 @@ import { generateUUID } from '@/lib/supabase-service';
 import { formatCurrency } from '@/lib/format';
 import type { Driver } from '@/types/database';
 import { useEffect } from 'react';
+import { useToast } from '@/components/Toast';
 
 export default function DriversPage() {
+  const toast = useToast();
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Driver | null>(null);
@@ -71,11 +73,14 @@ export default function DriversPage() {
     const updated = saveDriver(entry);
     setDrivers(updated);
     setShowForm(false);
+    toast.success(editing ? 'Driver updated' : 'Driver added', { message: entry.name });
   };
 
   const toggleActive = (id: string) => {
     const updated = toggleDriverActive(id);
     setDrivers(updated);
+    const driver = updated.find(d => d.id === id);
+    if (driver) toast.info(driver.is_active ? 'Driver activated' : 'Driver deactivated', { message: driver.name });
   };
 
   return (
@@ -86,9 +91,9 @@ export default function DriversPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           onClear={() => setSearch('')}
-          wrapperClassName="flex-1 max-w-xs"
+          wrapperClassName="w-full sm:flex-1 sm:max-w-xs"
         />
-        <Button onClick={() => openForm()}>
+        <Button onClick={() => openForm()} className="w-full sm:w-auto">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>
           Add Driver
         </Button>

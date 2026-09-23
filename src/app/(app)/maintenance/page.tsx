@@ -12,6 +12,7 @@ import { getStoredMaintenance, saveMaintenance, deleteMaintenance, syncMaintenan
 import { getVehicles, syncVehiclesFromSupabase } from '@/lib/master-store';
 import { generateUUID } from '@/lib/supabase-service';
 import type { Maintenance, PaymentMode, Vehicle } from '@/types/database';
+import { useToast } from '@/components/Toast';
 
 const PAYMENT_OPTIONS = [
   { value: 'cash', label: 'Cash' },
@@ -41,11 +42,13 @@ const emptyForm = (): Partial<Maintenance> => ({
 });
 
 export default function MaintenancePage() {
+  const toast = useToast();
   const [records, setRecords] = useState<Maintenance[]>([]);
   const [availableVehicles, setAvailableVehicles] = useState<Vehicle[]>([]);
   const [customVehicleMode, setCustomVehicleMode] = useState(false);
   const [search, setSearch] = useState('');
   const [vehicleFilter, setVehicleFilter] = useState('');
+  const [methodFilter, setMethodFilter] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -82,12 +85,52 @@ export default function MaintenancePage() {
         !r.vehicle_no.toLowerCase().includes(search.toLowerCase()) &&
         !(r.paid_to ?? '').toLowerCase().includes(search.toLowerCase())) return false;
     if (vehicleFilter && r.vehicle_no !== vehicleFilter) return false;
+    if (methodFilter && (r.payment_method || 'cash') !== methodFilter) return false;
     if (dateFrom && r.date < dateFrom) return false;
     if (dateTo && r.date > dateTo) return false;
     return true;
-  }), [records, search, vehicleFilter, dateFrom, dateTo]);
+  }), [records, search, vehicleFilter, methodFilter, dateFrom, dateTo]);
 
-  const totalAmount = filtered.reduce((s, r) => s + r.amount, 0);
+  const totalAmount = filtered.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const overallTotal = useMemo(
+    () => records.reduce((s, r) => s + (Number(r.amount) || 0), 0),
+    [records],
+  );
+
+  const vehicleBreakdown = useMemo(() => {
+    const map = new Map<string, { sum: number; count: number }>();
+    for (const r of records) {
+      const key = r.vehicle_no || '—';
+      const cur = map.get(key) ?? { sum: 0, count: 0 };
+      cur.sum += Number(r.amount) || 0;
+      cur.count += 1;
+      map.set(key, cur);
+    }
+    return [...map.entries()]
+      .map(([label, v]) => ({ label, sum: v.sum, count: v.count }))
+      .sort((a, b) => b.sum - a.sum);
+  }, [records]);
+
+  const methodBreakdown = useMemo(() => {
+    const map = new Map<string, { sum: number; count: number }>();
+    for (const r of records) {
+      const key = (r.payment_method || 'cash').toLowerCase();
+      const cur = map.get(key) ?? { sum: 0, count: 0 };
+      cur.sum += Number(r.amount) || 0;
+      cur.count += 1;
+      map.set(key, cur);
+    }
+    return [...map.entries()]
+      .map(([key, v]) => ({
+        key,
+        label: PAYMENT_OPTIONS.find(o => o.value === key)?.label || key,
+        sum: v.sum,
+        count: v.count,
+      }))
+      .sort((a, b) => b.sum - a.sum);
+  }, [records]);
+
+  const averageAmount = records.length > 0 ? overallTotal / records.length : 0;
 
   function openAdd() {
     setForm(emptyForm());
@@ -111,6 +154,7 @@ export default function MaintenancePage() {
     if (confirm('Are you sure you want to delete this maintenance record?')) {
       const updated = deleteMaintenance(id);
       setRecords([...updated]);
+      toast.success('Maintenance record deleted');
     }
   }
 
@@ -150,6 +194,9 @@ export default function MaintenancePage() {
     const updated = saveMaintenance(entry);
     setRecords([...updated]);
     setShowModal(false);
+    toast.success(editId ? 'Maintenance record updated' : 'Maintenance record added', {
+      message: `${entry.vehicle_no} · ${entry.work_part} · ${formatCurrency(entry.amount)}`,
+    });
   }
 
   const f = (k: keyof Maintenance) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -159,7 +206,7 @@ export default function MaintenancePage() {
     <div className="space-y-4">
       {/* Top bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap filter-bar min-w-0 w-full">
           <SearchInput
             placeholder="Search work, vehicle, vendor..."
             value={search}
@@ -167,29 +214,120 @@ export default function MaintenancePage() {
             onClear={() => setSearch('')}
             wrapperClassName="w-full sm:w-64"
           />
-          <select value={vehicleFilter} onChange={e => setVehicleFilter(e.target.value)} className="text-[13px]">
+          <select value={vehicleFilter} onChange={e => setVehicleFilter(e.target.value)} className="text-[13px] sm:w-auto">
             <option value="">All Vehicles</option>
             {vehicles.map(v => <option key={v} value={v}>{v}</option>)}
           </select>
-          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="text-[13px]" />
-          <span className="text-muted text-[13px]">to</span>
-          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="text-[13px]" />
+          <div className="filter-inline flex items-center gap-2 w-full sm:w-auto">
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="text-[13px] min-w-0" />
+            <span className="text-muted text-[13px] shrink-0">to</span>
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="text-[13px] min-w-0" />
+          </div>
         </div>
-        <Button onClick={openAdd}>
+        <Button onClick={openAdd} className="w-full sm:w-auto">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>
           Add Record
         </Button>
       </div>
 
-      {/* Summary */}
-      <div className="flex gap-4 text-[13px]">
-        <span className="text-muted">{filtered.length} record{filtered.length !== 1 ? 's' : ''}</span>
-        <span className="text-muted">•</span>
-        <span>Total: <strong className="text-negative">{formatCurrency(totalAmount)}</strong></span>
+      {/* Totals — same card style as Payment */}
+      <div className="grid grid-cols-1 min-[481px]:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div className="rounded-xl border border-line bg-panel p-4 shadow-sm border-l-4 border-l-negative">
+          <p className="text-[11px] text-negative uppercase tracking-wider font-bold">Total Maintenance</p>
+          <p className="text-[22px] font-bold text-negative mt-1">{formatCurrency(overallTotal)}</p>
+          <p className="text-[11px] text-muted mt-1">Across all {records.length} records</p>
+        </div>
+        <div className="rounded-xl border border-line bg-panel p-4 shadow-sm">
+          <p className="text-[11px] text-muted uppercase tracking-wider font-semibold">Showing Now</p>
+          <p className="text-[22px] font-bold text-ink mt-1">{formatCurrency(totalAmount)}</p>
+          <p className="text-[11px] text-muted mt-1">{filtered.length} record{filtered.length === 1 ? '' : 's'} in current filter</p>
+        </div>
+        <div className="rounded-xl border border-line bg-panel p-4 shadow-sm">
+          <p className="text-[11px] text-muted uppercase tracking-wider font-semibold">Vehicles</p>
+          <p className="text-[22px] font-bold text-primary mt-1">{vehicleBreakdown.length}</p>
+          <p className="text-[11px] text-muted mt-1">Vehicles with maintenance</p>
+        </div>
+        <div className="rounded-xl border border-line bg-panel p-4 shadow-sm">
+          <p className="text-[11px] text-muted uppercase tracking-wider font-semibold">Average Bill</p>
+          <p className="text-[22px] font-bold text-ink mt-1">{formatCurrency(averageAmount)}</p>
+          <p className="text-[11px] text-muted mt-1">Per maintenance record</p>
+        </div>
       </div>
+
+      {vehicleBreakdown.length > 0 && (
+        <Card>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+            <div>
+              <h2 className="text-sm font-semibold text-ink">Vehicle-wise Maintenance</h2>
+              <p className="text-[12px] text-muted">Click a vehicle to filter the list below</p>
+            </div>
+            {(vehicleFilter || methodFilter) && (
+              <button
+                type="button"
+                onClick={() => { setVehicleFilter(''); setMethodFilter(''); }}
+                className="text-[12px] font-medium text-primary hover:underline self-start sm:self-auto"
+              >
+                Reset Filter (Show All)
+              </button>
+            )}
+          </div>
+          <div className="grid grid-cols-1 min-[481px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {vehicleBreakdown.map(item => {
+              const selected = vehicleFilter === item.label;
+              return (
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => setVehicleFilter(selected ? '' : item.label)}
+                  className={`text-left p-3 rounded-xl border transition-all duration-150 ${
+                    selected
+                      ? 'border-primary bg-primary/10 shadow-sm ring-1 ring-primary'
+                      : 'border-line/70 bg-paper/60 hover:bg-paper hover:border-line'
+                  }`}
+                >
+                  <span className="text-[12px] font-bold text-ink truncate block" title={item.label}>{item.label}</span>
+                  <p className="text-[16px] font-bold text-negative mt-1">{formatCurrency(item.sum)}</p>
+                  <p className="text-[11px] text-muted mt-0.5">{item.count} {item.count === 1 ? 'record' : 'records'}</p>
+                </button>
+              );
+            })}
+          </div>
+
+          {methodBreakdown.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-line">
+              <h3 className="text-[13px] font-semibold text-ink mb-2">Payment method totals</h3>
+              <div className="grid grid-cols-1 min-[481px]:grid-cols-2 sm:grid-cols-4 gap-3">
+                {methodBreakdown.map(item => {
+                  const selected = methodFilter === item.key;
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => setMethodFilter(selected ? '' : item.key)}
+                      className={`text-left p-3 rounded-xl border transition-all duration-150 ${
+                        selected
+                          ? 'border-primary bg-primary/10 shadow-sm ring-1 ring-primary'
+                          : 'border-line/70 bg-paper/60 hover:bg-paper hover:border-line'
+                      }`}
+                    >
+                      <span className="text-[12px] font-bold text-ink">{item.label}</span>
+                      <p className="text-[16px] font-bold text-ink mt-1">{formatCurrency(item.sum)}</p>
+                      <p className="text-[11px] text-muted mt-0.5">{item.count} {item.count === 1 ? 'payment' : 'payments'}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* Table */}
       <Card padding="none">
+        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-line bg-paper/70">
+          <span className="text-[13px] font-bold text-ink">Total ({filtered.length} {filtered.length === 1 ? 'entry' : 'entries'})</span>
+          <span className="text-[16px] font-bold text-negative whitespace-nowrap">{formatCurrency(totalAmount)}</span>
+        </div>
         {filtered.length === 0 ? (
           <EmptyState title="No maintenance records" description="Add the first maintenance record." actionLabel="Add Record" onAction={openAdd} />
         ) : (
@@ -235,9 +373,11 @@ export default function MaintenancePage() {
                 ))}
               </tbody>
               <tfoot>
-                <tr className="border-t-2 border-line bg-paper/50">
-                  <td colSpan={3} className="px-4 py-3 text-[13px] font-semibold text-ink">Total</td>
-                  <td className="px-4 py-3 text-[13px] text-right font-bold text-negative">{formatCurrency(totalAmount)}</td>
+                <tr className="border-t-2 border-line bg-paper/70 font-semibold">
+                  <td colSpan={3} className="px-4 py-3.5 text-[13px] font-bold text-ink">
+                    Total Maintenance ({filtered.length} Entries)
+                  </td>
+                  <td className="px-4 py-3.5 text-[13px] text-right font-bold text-negative">{formatCurrency(totalAmount)}</td>
                   <td colSpan={5} />
                 </tr>
               </tfoot>
@@ -256,7 +396,7 @@ export default function MaintenancePage() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-4">
             <TextField label="Date" type="date" value={form.date ?? ''} onChange={f('date')} required />
 
             {/* Vehicle No. Dropdown from Master */}
@@ -357,7 +497,7 @@ export default function MaintenancePage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-4">
             <TextField
               label="Amount (₹)"
               type="number"
@@ -375,7 +515,7 @@ export default function MaintenancePage() {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-4">
             <SelectField
               label="Payment Method"
               value={form.payment_method ?? 'cash'}

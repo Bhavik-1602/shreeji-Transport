@@ -4,7 +4,6 @@
 import type { PaymentMode, PaymentStatus } from '@/types/database';
 import {
   fetchSupabaseTrips,
-  fetchSupabasePayments,
   upsertSupabaseTrip,
   deleteSupabaseTrip,
   generateUUID,
@@ -12,15 +11,12 @@ import {
 import {
   recordOrUpdatePaymentForTrip,
   removePaymentForTrip,
-  syncPaymentsFromTrips,
   getStoredPayments,
   recordOrUpdateFastagForTrip,
-  syncFastagFromTrips,
   recordOrUpdateDriverSilikForTrip,
-  syncDriverSummariesFromTrips,
 } from './operations-store';
 import type { Payment } from '@/types/database';
-import { recordOrUpdateDieselForTrip, syncDieselFromTrips, removeDieselForTrip } from './diesel-store';
+import { recordOrUpdateDieselForTrip, removeDieselForTrip } from './diesel-store';
 
 export interface UnifiedTrip {
   id: string;
@@ -66,25 +62,32 @@ export const canonicalInitialTrips: UnifiedTrip[] = [];
 let memoryTrips: UnifiedTrip[] = [];
 const listeners: Array<(trips: UnifiedTrip[]) => void> = [];
 
-// Flexible matcher for SR numbers (e.g. 'SR0001', 'SR-000001', 'SR-0001', '1', 'SR/26-27/0001')
+// Match SR variants only (SR0001, SR-0001, SR-000001). Do not match unrelated
+// values that merely end with the same digits — that was summing the wrong
+// payments into a trip and inflating received amounts.
+function srIdentity(value: string): string | null {
+  let s = value.trim().toLowerCase();
+  s = s.replace(/\(return\)/g, ' ');
+  s = s.replace(/\breturn\b/g, ' ');
+  s = s.replace(/[^a-z0-9]/g, '');
+  const match = s.match(/^sr0*(\d+)$/);
+  if (!match) return null;
+  return `sr${parseInt(match[1], 10)}`;
+}
+
 export function isSrNumberMatch(a?: string | null, b?: string | null): boolean {
   if (!a || !b) return false;
   const cleanA = a.trim().toLowerCase();
   const cleanB = b.trim().toLowerCase();
   if (cleanA === cleanB) return true;
 
-  // Compare without any hyphens, slashes, or spaces
   const alphaA = cleanA.replace(/[^a-z0-9]/g, '');
   const alphaB = cleanB.replace(/[^a-z0-9]/g, '');
   if (alphaA.length > 0 && alphaA === alphaB) return true;
 
-  // Compare trailing digits (e.g. 0001 === 1)
-  const numA = cleanA.match(/(\d+)$/)?.[1];
-  const numB = cleanB.match(/(\d+)$/)?.[1];
-  if (numA && numB && parseInt(numA, 10) === parseInt(numB, 10)) {
-    return true;
-  }
-  return false;
+  const idA = srIdentity(a);
+  const idB = srIdentity(b);
+  return Boolean(idA && idB && idA === idB);
 }
 
 // Distinguishes whether a payment belongs to a specific trip, especially
@@ -177,8 +180,16 @@ export function reconcileTripsWithPayments(trips: UnifiedTrip[], payments: Payme
     const anyPaymentForThisSr = payList.some(p => isSrNumberMatch(p.trip_ref, trip.sr_number) || p.trip_ref === trip.id);
     const hasSiblingWithSameSr = trips.some(other => other.id !== trip.id && isSrNumberMatch(other.sr_number, trip.sr_number));
 
+    const tripRec = trip.received_amount != null && !isNaN(Number(trip.received_amount))
+      ? Number(trip.received_amount)
+      : 0;
+
     let effectiveRec: number;
-    if (matchingPayments.length > 0) {
+    if (tripRec > 0) {
+      // Amount entered on the trip is the source of truth. Summing every
+      // matching payment row double-counts duplicates and inflates the figure.
+      effectiveRec = tripRec;
+    } else if (matchingPayments.length > 0) {
       effectiveRec = sumPayments;
     } else if (hasSiblingWithSameSr && anyPaymentForThisSr) {
       // Sibling got the payment, so this leg did NOT get it!
@@ -399,7 +410,7 @@ export function subscribeTrips(fn: (trips: UnifiedTrip[]) => void): () => void {
   };
 }
 
-export function saveTrip(entry: Partial<UnifiedTrip> & { id?: string }): UnifiedTrip {
+export function saveTrip(entry: Partial<UnifiedTrip> & { id?: string; silik_payment_mode?: string | null }): UnifiedTrip {
   const trips = getStoredTrips();
   const calcs = computeUnifiedCalculations(entry);
 
@@ -506,7 +517,11 @@ export function saveTrip(entry: Partial<UnifiedTrip> & { id?: string }): Unified
   // Sync driver silik to Driver Summary module
   if (finalEntry.driver_silik && Number(finalEntry.driver_silik) > 0) {
     try {
-      recordOrUpdateDriverSilikForTrip(finalEntry);
+      const silikMode = (entry as { silik_payment_mode?: string | null }).silik_payment_mode;
+      recordOrUpdateDriverSilikForTrip({
+        ...finalEntry,
+        silik_payment_mode: silikMode || null,
+      });
     } catch (e) {
       console.warn('Could not sync trip silik to driver summary:', e);
     }
@@ -618,40 +633,9 @@ export async function syncTripsFromSupabase(): Promise<UnifiedTrip[]> {
     }
     notifyListeners();
 
-    // Reconcile with remote payments from Supabase as well
-    fetchSupabasePayments().then(remotePayments => {
-      if (remotePayments && remotePayments.length > 0) {
-        const reReconciled = reconcileTripsWithPayments(memoryTrips, remotePayments);
-        memoryTrips = [...reReconciled];
-        if (typeof window !== 'undefined') {
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(memoryTrips));
-          } catch {}
-        }
-        notifyListeners();
-      }
-    }).catch(() => {});
-
-    try {
-      syncPaymentsFromTrips(memoryTrips);
-    } catch (e) {
-      console.warn('Could not sync payments from trips:', e);
-    }
-    try {
-      syncDieselFromTrips(memoryTrips);
-    } catch (e) {
-      console.warn('Could not sync diesel from trips:', e);
-    }
-    try {
-      syncFastagFromTrips(memoryTrips);
-    } catch (e) {
-      console.warn('Could not sync fastag from trips:', e);
-    }
-    try {
-      syncDriverSummariesFromTrips(memoryTrips);
-    } catch (e) {
-      console.warn('Could not sync driver summaries from trips:', e);
-    }
+    // Module pages sync Diesel / Fastag / Payment / Driver Summary after both
+    // trip and module rows have loaded. Doing it here raced with those fetches
+    // and left duplicate or inflated rows in the database.
     return memoryTrips;
   }
   return getStoredTrips();

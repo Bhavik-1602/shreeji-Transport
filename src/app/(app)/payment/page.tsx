@@ -14,6 +14,7 @@ import { getBankAccounts, getVehicles, getParties, syncBankAccountsFromSupabase 
 import { getStoredTrips, subscribeTrips, updateTripPayment, syncTripsFromSupabase, isSrNumberMatch, isPaymentForTrip, type UnifiedTrip } from '@/lib/trip-store';
 import { generateUUID } from '@/lib/supabase-service';
 import type { Payment, PaymentMode, BankAccount, Vehicle, Party } from '@/types/database';
+import { useToast } from '@/components/Toast';
 
 const PAYMENT_OPTIONS = [
   { value: 'cash', label: 'Cash (Cash Counter)' },
@@ -36,6 +37,7 @@ const emptyForm = (): Partial<Payment> => ({
 });
 
 export default function PaymentPage() {
+  const toast = useToast();
   const [records, setRecords] = useState<Payment[]>(() => getStoredPayments());
   const [trips, setTrips] = useState<UnifiedTrip[]>(() => getStoredTrips());
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>(() => getBankAccounts());
@@ -68,15 +70,14 @@ export default function PaymentPage() {
     refreshData();
 
     // Auto-sync with Supabase if online
-    syncTripsFromSupabase().then(remote => {
-      if (remote && remote.length > 0) {
-        setTrips([...remote]);
-        syncPaymentsFromTrips(remote);
-        setRecords(getStoredPayments());
-      }
-    });
-    syncPaymentsFromSupabase().then(remote => {
-      if (remote && remote.length > 0) setRecords([...remote]);
+    Promise.all([
+      syncTripsFromSupabase().catch(() => null),
+      syncPaymentsFromSupabase().catch(() => null),
+    ]).then(() => {
+      const freshTrips = getStoredTrips();
+      syncPaymentsFromTrips(freshTrips);
+      setTrips([...freshTrips]);
+      setRecords(getStoredPayments());
     });
     syncBankAccountsFromSupabase().then(remote => {
       if (remote && remote.length > 0) setBankAccounts([...remote]);
@@ -139,7 +140,7 @@ export default function PaymentPage() {
   const filteredRecords = useMemo(() => records.filter(r => {
     if (search) {
       const q = search.toLowerCase();
-      const matchParty = r.party_name.toLowerCase().includes(q);
+      const matchParty = (r.party_name || '').toLowerCase().includes(q);
       const matchTrip = (r.trip_ref ?? '').toLowerCase().includes(q);
       const matchVeh = (r.vehicle_no ?? '').toLowerCase().includes(q);
       const matchAcc = (r.bank_account ?? '').toLowerCase().includes(q);
@@ -152,7 +153,7 @@ export default function PaymentPage() {
       if (!acc.includes(accountFilter.toLowerCase())) return false;
     }
     return true;
-  }), [records, search, modeFilter, accountFilter]);
+  }).sort((a, b) => (b.date || '').localeCompare(a.date || '')), [records, search, modeFilter, accountFilter]);
 
   // Filtered pending trips for Tab 2 (Pending Receivables)
   const filteredPendingTrips = useMemo(() => {
@@ -292,19 +293,20 @@ export default function PaymentPage() {
     if (window.confirm(`Are you sure you want to delete payment record of ${formatCurrency(amount)} from "${partyName}"?`)) {
       const updated = deletePayment(id);
       setRecords(updated);
+      toast.success('Payment deleted', { message: `${partyName} · ${formatCurrency(amount)}` });
     }
   }
 
   // Handle Save Payment (Synchronizes with Trip Store)
   function handleSave() {
     if (!form.date || !form.party_name || form.received_amount == null || form.received_amount === ('' as unknown as number)) {
-      alert('Please fill Date, Party Name and Received Amount.');
+      toast.error('Some details are missing', { message: 'Please fill Date, Party Name and Received Amount.' });
       return;
     }
 
     const recAmount = Number(form.received_amount);
     if (isNaN(recAmount) || recAmount < 0) {
-      alert('Please enter a valid received amount.');
+      toast.error('Invalid amount', { message: 'Please enter a valid received amount.' });
       return;
     }
 
@@ -408,6 +410,9 @@ export default function PaymentPage() {
     }
 
     setShowModal(false);
+    toast.success(editId ? 'Payment updated' : 'Payment recorded', {
+      message: `${entry.party_name} · ${formatCurrency(recAmount)}${targetTrip ? ` · Trip ${entry.trip_ref}` : ''}`,
+    });
   }
 
   const f = (k: keyof Payment) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -438,13 +443,13 @@ export default function PaymentPage() {
     <div className="space-y-5">
       {/* Top Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3 flex-wrap flex-1">
+        <div className="flex items-center gap-3 flex-wrap flex-1 min-w-0 w-full filter-bar">
           <SearchInput
             placeholder="Search party, trip SR, vehicle, account..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             onClear={() => setSearch('')}
-            wrapperClassName="flex-1 max-w-xs"
+            wrapperClassName="flex-1 min-w-0 w-full sm:max-w-xs"
           />
           {activeTab === 'collections' && (
             <>
@@ -459,26 +464,26 @@ export default function PaymentPage() {
             </>
           )}
         </div>
-        <Button onClick={openAdd}>
+        <Button onClick={openAdd} className="w-full sm:w-auto">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>
           Record Payment
         </Button>
       </div>
 
       {/* Main Metric Cards (100% Unified across Trips & Payments) */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 min-[481px]:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="rounded-xl border border-line bg-panel p-4 shadow-sm">
-          <p className="text-[11px] text-muted uppercase tracking-wider font-semibold">Total Freight Billed (કુલ ભાડું)</p>
+          <p className="text-[11px] text-muted uppercase tracking-wider font-semibold">Total Freight Billed</p>
           <p className="text-[22px] font-bold text-ink mt-1">{formatCurrency(totalFreight)}</p>
           <p className="text-[11px] text-muted mt-1">Across all {trips.length} recorded trips</p>
         </div>
         <div className="rounded-xl border border-line bg-panel p-4 shadow-sm border-l-4 border-l-positive">
-          <p className="text-[11px] text-positive uppercase tracking-wider font-bold">Total Received (જમા રકમ)</p>
+          <p className="text-[11px] text-positive uppercase tracking-wider font-bold">Total Received</p>
           <p className="text-[22px] font-bold text-positive mt-1">{formatCurrency(totalReceived)}</p>
           <p className="text-[11px] text-positive/80 mt-1">Successfully collected in accounts</p>
         </div>
         <div className="rounded-xl border border-line bg-panel p-4 shadow-sm border-l-4 border-l-amber-500">
-          <p className="text-[11px] text-amber-700 uppercase tracking-wider font-bold">Outstanding Balance (બાકી રકમ)</p>
+          <p className="text-[11px] text-amber-700 uppercase tracking-wider font-bold">Outstanding Balance</p>
           <p className={`text-[22px] font-bold mt-1 ${totalPendingBalance > 0 ? 'text-amber-700' : 'text-positive'}`}>
             {formatCurrency(totalPendingBalance)}
           </p>
@@ -493,7 +498,7 @@ export default function PaymentPage() {
         </div>
       </div>
 
-      {/* Account-wise Collections Breakdown ("કયા ખાતામાં આવ્યા / Bank Account Breakdown") */}
+      {/* Account-wise collections breakdown */}
       <Card>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
           <div>
@@ -502,7 +507,7 @@ export default function PaymentPage() {
                 <rect x="2" y="5" width="20" height="14" rx="2" />
                 <line x1="2" y1="10" x2="22" y2="10" />
               </svg>
-              Account-wise Collections (કયા ખાતામાં કેટલા આવ્યા)
+              Account-wise Collections
             </h2>
             <p className="text-[12px] text-muted">Click any account below to filter received payment transactions</p>
           </div>
@@ -516,7 +521,7 @@ export default function PaymentPage() {
           )}
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-1 min-[481px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {accountBreakdown.map(item => {
             const isSelected = accountFilter.toLowerCase() === item.label.toLowerCase();
             const isCash = item.label.toLowerCase().includes('cash');
@@ -572,7 +577,7 @@ export default function PaymentPage() {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="20 6 9 17 4 12" />
           </svg>
-          Received Collections (જમા રકમ)
+          Received Collections
           <span className="px-2 py-0.5 rounded-full text-[11px] bg-positive/10 text-positive font-bold">
             {records.length}
           </span>
@@ -591,7 +596,7 @@ export default function PaymentPage() {
             <circle cx="12" cy="12" r="10" />
             <polyline points="12 6 12 12 16 14" />
           </svg>
-          Pending Receivables (બાકી લેવાના નાણાં)
+          Pending Receivables
           <span className="px-2 py-0.5 rounded-full text-[11px] bg-amber-500/15 text-amber-700 font-bold">
             {pendingTrips.length} Trips &bull; {formatCurrency(totalPendingBalance)}
           </span>
@@ -618,10 +623,10 @@ export default function PaymentPage() {
                     <th className="text-left text-[12px] font-semibold text-muted px-4 py-3 whitespace-nowrap">Vehicle No.</th>
                     <th className="text-left text-[12px] font-semibold text-muted px-4 py-3 whitespace-nowrap">Trip / SR Ref</th>
                     <th className="text-right text-[12px] font-semibold text-muted px-4 py-3 whitespace-nowrap">Total Freight</th>
-                    <th className="text-right text-[12px] font-semibold text-positive px-4 py-3 whitespace-nowrap">Received Amount (જમા)</th>
-                    <th className="text-right text-[12px] font-semibold text-muted px-4 py-3 whitespace-nowrap">Balance (બાકી)</th>
+                    <th className="text-right text-[12px] font-semibold text-positive px-4 py-3 whitespace-nowrap">Received Amount</th>
+                    <th className="text-right text-[12px] font-semibold text-muted px-4 py-3 whitespace-nowrap">Balance</th>
                     <th className="text-left text-[12px] font-semibold text-muted px-4 py-3 whitespace-nowrap">Payment Mode</th>
-                    <th className="text-left text-[12px] font-semibold text-primary px-4 py-3 whitespace-nowrap">Deposited In / Kema Aavyu (ખાતું)</th>
+                    <th className="text-left text-[12px] font-semibold text-primary px-4 py-3 whitespace-nowrap">Deposited In</th>
                     <th className="text-left text-[12px] font-semibold text-muted px-4 py-3 whitespace-nowrap">Txn / UTR Ref</th>
                     <th className="text-left text-[12px] font-semibold text-muted px-4 py-3 whitespace-nowrap">Note</th>
                     <th className="text-right text-[12px] font-semibold text-muted px-4 py-3 whitespace-nowrap">Actions</th>
@@ -760,9 +765,9 @@ export default function PaymentPage() {
                     <th className="text-left text-[12px] font-semibold text-muted px-4 py-3 whitespace-nowrap">Party / Customer</th>
                     <th className="text-left text-[12px] font-semibold text-muted px-4 py-3 whitespace-nowrap">Route (From → To)</th>
                     <th className="text-left text-[12px] font-semibold text-muted px-4 py-3 whitespace-nowrap">Vehicle & Driver</th>
-                    <th className="text-right text-[12px] font-semibold text-ink px-4 py-3 whitespace-nowrap">Kul Freight (₹)</th>
+                    <th className="text-right text-[12px] font-semibold text-ink px-4 py-3 whitespace-nowrap">Total Freight (₹)</th>
                     <th className="text-right text-[12px] font-semibold text-positive px-4 py-3 whitespace-nowrap">Already Received (₹)</th>
-                    <th className="text-right text-[12px] font-bold text-amber-700 px-4 py-3 whitespace-nowrap">Pending Balance (બાકી ₹)</th>
+                    <th className="text-right text-[12px] font-bold text-amber-700 px-4 py-3 whitespace-nowrap">Pending Balance</th>
                     <th className="text-center text-[12px] font-semibold text-muted px-4 py-3 whitespace-nowrap">Status</th>
                     <th className="text-center text-[12px] font-semibold text-muted px-4 py-3 whitespace-nowrap">Action</th>
                   </tr>
@@ -860,14 +865,14 @@ export default function PaymentPage() {
       <Modal
         open={showModal}
         onClose={() => setShowModal(false)}
-        title={editId ? 'Edit Payment Record' : 'Record Received Payment (નાણાં જમા કરો)'}
+        title={editId ? 'Edit Payment Record' : 'Record Received Payment'}
         size="lg"
       >
         <div className="space-y-4">
           {/* Trip Linking Selector (Allows selecting any pending trip to auto-fill) */}
           <div className="p-3 rounded-xl bg-paper border border-line">
             <label className="block text-[12px] font-bold text-primary mb-1">
-              Select Pending Trip / Customer (ટ્રિપ પસંદ કરો - ઓટો ભરાશે)
+              Select a pending trip or customer
             </label>
             <select
               value={selectedTripId ?? ''}
@@ -902,7 +907,7 @@ export default function PaymentPage() {
                 const bal = t.balance_amount != null ? Number(t.balance_amount) : Math.max(0, tf - rec);
                 return (
                   <option key={t.id} value={t.id}>
-                    [{t.sr_number}{t.is_return_leg ? ' (Return)' : ''}] {t.party_name} — Baki: {formatCurrency(bal)} ({t.loading_from} → {t.loading_to})
+                    [{t.sr_number}{t.is_return_leg ? ' (Return)' : ''}] {t.party_name} — Balance: {formatCurrency(bal)} ({t.loading_from} → {t.loading_to})
                   </option>
                 );
               })}
@@ -912,7 +917,7 @@ export default function PaymentPage() {
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-4">
             <TextField
               label="Payment Date *"
               type="date"
@@ -937,7 +942,7 @@ export default function PaymentPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-4">
             <div>
               <label className="block text-[13px] font-medium text-ink mb-1.5">
                 Vehicle No. <span className="text-muted text-[12px]">(Optional)</span>
@@ -993,7 +998,7 @@ export default function PaymentPage() {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-4">
             <TextField
               label="Total Freight Amount (₹) (Optional)"
               type="number"
@@ -1029,7 +1034,7 @@ export default function PaymentPage() {
             <div className={`rounded-xl p-3 border ${computedBalance > 0 ? 'border-amber-300 bg-amber-500/10' : 'border-positive/30 bg-positive/10'}`}>
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-[12px] text-ink font-semibold">Remaining Balance After This Payment (બાકી રકમ)</p>
+                  <p className="text-[12px] text-ink font-semibold">Remaining Balance After This Payment</p>
                   <p className="text-[11px] text-muted mt-0.5">Freight Amount minus Received Amount</p>
                 </div>
                 <p className={`text-[20px] font-extrabold ${computedBalance > 0 ? 'text-amber-800' : 'text-positive'}`}>
@@ -1039,7 +1044,7 @@ export default function PaymentPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-4">
             <SelectField
               label="Payment Mode *"
               value={form.payment_mode ?? 'bank_transfer'}
@@ -1049,7 +1054,7 @@ export default function PaymentPage() {
 
             <div>
               <label className="block text-[13px] font-medium text-ink mb-1.5">
-                Deposited Into / Account (કયા ખાતામાં આવ્યા) *
+                Deposited Into / Account *
               </label>
 
               {isCustomAccount ? (
@@ -1099,7 +1104,7 @@ export default function PaymentPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-4">
             <TextField
               label="Transaction / UTR Ref No. (Optional)"
               value={form.transaction_ref ?? ''}

@@ -86,7 +86,7 @@ export default function Header({ title, onMenuToggle, actions }: HeaderProps) {
 
           {/* Dropdown Menu */}
           {dropdownOpen && (
-            <div className="absolute right-0 mt-2 w-64 rounded-xl border border-line bg-panel p-2 shadow-lg animate-in fade-in zoom-in-95 duration-100">
+            <div className="absolute right-0 mt-2 w-[min(16rem,calc(100vw-1.25rem))] rounded-xl border border-line bg-panel p-2 shadow-lg animate-in fade-in zoom-in-95 duration-100">
               <div className="px-3 py-2 border-b border-line mb-1">
                 <p className="text-[11px] font-semibold text-muted uppercase tracking-wider">Signed in as</p>
                 <p className="text-[13px] font-bold text-ink truncate mt-0.5" title={user?.email || ''}>

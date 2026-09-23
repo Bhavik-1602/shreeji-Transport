@@ -10,9 +10,9 @@ export default function Card({ padding = 'md', className, children, ...props }: 
     <div
       className={clsx(
         'rounded-card border border-line bg-panel',
-        padding === 'sm' && 'p-4',
-        padding === 'md' && 'p-6',
-        padding === 'lg' && 'p-8',
+        padding === 'sm' && 'p-3 sm:p-4',
+        padding === 'md' && 'p-4 sm:p-6',
+        padding === 'lg' && 'p-5 sm:p-8',
         padding === 'none' && '',
         className,
       )}
@@ -49,11 +49,11 @@ export function StatCard({ title, value, subtitle, color = 'primary', icon }: St
   };
 
   return (
-    <div className="rounded-card border border-line bg-panel p-5">
-      <div className="flex items-start justify-between">
+    <div className="rounded-card border border-line bg-panel p-4 sm:p-5 min-w-0">
+      <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <p className="text-[13px] font-medium text-muted truncate">{title}</p>
-          <p className={clsx('text-2xl font-semibold mt-1', colorClasses[color])}>{value}</p>
+          <p className={clsx('text-xl sm:text-2xl font-semibold mt-1 break-words', colorClasses[color])}>{value}</p>
           {subtitle && (
             <p className="text-[12px] text-muted mt-1">{subtitle}</p>
           )}

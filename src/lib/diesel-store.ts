@@ -229,13 +229,14 @@ export function syncDieselFromTrips(trips: Array<{
         (e.trip_id && e.trip_id === t.id) ||
         (cleanSr && e.slip_no && (e.slip_no.trim().toLowerCase() === cleanSr.toLowerCase() || e.slip_no.trim().toLowerCase() === slipLabel.toLowerCase()))
       );
+      let keepId = '';
 
       if (existingIdx >= 0) {
         const existing = list[existingIdx];
         if (
-          existing.diesel_liter !== litres ||
-          existing.amount !== computedAmount ||
-          existing.rate !== rate ||
+          Number(existing.diesel_liter) !== Number(litres) ||
+          Number(existing.amount) !== Number(computedAmount) ||
+          Number(existing.rate) !== Number(rate) ||
           existing.truck_no !== t.vehicle_no ||
           existing.driver_name !== t.driver_name ||
           existing.trip_id !== t.id
@@ -256,6 +257,7 @@ export function syncDieselFromTrips(trips: Array<{
           changed = true;
           upsertSupabaseDiesel(updatedItem).catch(() => {});
         }
+        keepId = list[existingIdx].id;
       } else {
         const maxSr = list.reduce((m, item) => Math.max(m, item.sr_no || 0), 0);
         const newEntry: DieselEntry = {
@@ -273,9 +275,25 @@ export function syncDieselFromTrips(trips: Array<{
           notes: `Trip ${cleanSr} (${t.loading_from || ''} to ${t.loading_to || ''})`,
           created_at: new Date().toISOString(),
         };
-        list.push(newEntry);
+        list.unshift(newEntry);
         changed = true;
         upsertSupabaseDiesel(newEntry).catch(() => {});
+        keepId = newEntry.id;
+      }
+
+      const slipKey = slipLabel.trim().toLowerCase();
+      const removedIds: string[] = [];
+      list = list.filter(e => {
+        const sameTrip = Boolean(t.id && e.trip_id && e.trip_id === t.id);
+        const sameSlip = Boolean(slipKey && e.slip_no && e.slip_no.trim().toLowerCase() === slipKey);
+        if (!sameTrip && !sameSlip) return true;
+        if (e.id === keepId) return true;
+        if (e.id) removedIds.push(e.id);
+        return false;
+      });
+      if (removedIds.length > 0) {
+        changed = true;
+        removedIds.forEach(id => deleteSupabaseDiesel(id).catch(() => {}));
       }
     } else {
       // If diesel details removed from trip, clean up any existing diesel entry tied to this trip

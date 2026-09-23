@@ -65,7 +65,7 @@ export default function MaintenanceSummaryPage() {
   return (
     <div className="space-y-6">
       {/* Filters */}
-      <div className="flex flex-wrap gap-3 items-center">
+      <div className="flex flex-wrap gap-3 items-center filter-bar">
         <select value={yearFilter} onChange={e => setYearFilter(e.target.value)} className="text-[13px]">
           <option value="2026">2026</option>
           <option value="2025">2025</option>
@@ -81,7 +81,7 @@ export default function MaintenanceSummaryPage() {
 
       {/* Vehicle breakdown */}
       {byVehicle.length > 1 && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 min-[481px]:grid-cols-2 lg:grid-cols-4 gap-3">
           {byVehicle.map(([vehicle, amt], i) => (
             <div key={vehicle} className="rounded-xl border border-line bg-panel p-4">
               <p className="text-[11px] text-muted uppercase tracking-wider truncate">{vehicle}</p>
@@ -107,15 +107,15 @@ export default function MaintenanceSummaryPage() {
         ) : byMonth.map(([monthKey, { records, total }], mi) => (
           <Card key={monthKey} padding="none">
             {/* Month header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-line">
-              <div className="flex items-center gap-3">
-                <div className={`w-3 h-3 rounded-full ${MONTH_COLORS[mi % MONTH_COLORS.length]}`} />
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-5 py-4 border-b border-line">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className={`w-3 h-3 rounded-full shrink-0 ${MONTH_COLORS[mi % MONTH_COLORS.length]}`} />
                 <h3 className="text-[15px] font-semibold text-ink">{formatMonth(monthKey)}</h3>
                 <span className="text-[12px] text-muted">{records.length} record{records.length !== 1 ? 's' : ''}</span>
               </div>
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-4 min-w-0">
                 {/* Mini bar */}
-                <div className="w-32 h-2 rounded-full bg-line overflow-hidden">
+                <div className="hidden min-[481px]:block w-24 sm:w-32 h-2 rounded-full bg-line overflow-hidden">
                   <div
                     className={`h-full rounded-full ${MONTH_COLORS[mi % MONTH_COLORS.length]}`}
                     style={{ width: `${(total / maxMonthAmount) * 100}%` }}
@@ -125,7 +125,8 @@ export default function MaintenanceSummaryPage() {
               </div>
             </div>
             {/* Records table */}
-            <table className="w-full">
+            <div className="overflow-x-auto table-scroll">
+            <table className="w-full min-w-[640px]">
               <thead>
                 <tr className="border-b border-line/50">
                   <th className="text-left text-[12px] font-medium text-muted px-5 py-2">Date</th>
@@ -153,6 +154,7 @@ export default function MaintenanceSummaryPage() {
                 </tr>
               </tfoot>
             </table>
+            </div>
           </Card>
         ))}
       </div>

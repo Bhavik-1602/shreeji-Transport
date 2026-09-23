@@ -10,6 +10,7 @@ import { TextField, SelectField } from '@/components/Input';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { getStoredInvestments, saveInvestment, syncInvestmentsFromSupabase } from '@/lib/operations-store';
 import type { Investment, InvestmentCategory, PaymentMode } from '@/types/database';
+import { useToast } from '@/components/Toast';
 
 const CATEGORY_OPTIONS: { value: InvestmentCategory; label: string }[] = [
   { value: 'vehicle_purchase', label: 'Vehicle Purchase' },
@@ -55,6 +56,7 @@ const emptyForm = (): Partial<Investment> => ({
 });
 
 export default function InvestmentPage() {
+  const toast = useToast();
   const [records, setRecords] = useState<Investment[]>([]);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -90,7 +92,10 @@ export default function InvestmentPage() {
   function openEdit(r: Investment) { setForm({ ...r }); setEditId(r.id); setShowModal(true); }
 
   function handleSave() {
-    if (!form.date || !form.description || !form.amount) return;
+    if (!form.date || !form.description || !form.amount) {
+      toast.error('Some details are missing', { message: 'Please fill Date, Description and Amount.' });
+      return;
+    }
     const entry: Investment = {
       id: editId ?? `inv${Date.now()}`,
       transport_id: 't1',
@@ -108,6 +113,9 @@ export default function InvestmentPage() {
     const updated = saveInvestment(entry);
     setRecords(updated);
     setShowModal(false);
+    toast.success(editId ? 'Investment updated' : 'Investment added', {
+      message: `${entry.description} · ${formatCurrency(entry.amount)}`,
+    });
   }
 
   const f = (k: keyof Investment) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -120,7 +128,7 @@ export default function InvestmentPage() {
     <div className="space-y-4">
       {/* Top bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap filter-bar min-w-0 w-full">
           <SearchInput
             placeholder="Search description, vehicle, vendor..."
             value={search}
@@ -128,12 +136,12 @@ export default function InvestmentPage() {
             onClear={() => setSearch('')}
             wrapperClassName="w-full sm:w-64"
           />
-          <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} className="text-[13px]">
+          <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} className="text-[13px] sm:w-auto">
             <option value="">All Categories</option>
             {CATEGORY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </div>
-        <Button onClick={openAdd}>
+        <Button onClick={openAdd} className="w-full sm:w-auto">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>
           Add Investment
         </Button>
@@ -208,20 +216,20 @@ export default function InvestmentPage() {
       {/* Modal */}
       <Modal open={showModal} onClose={() => setShowModal(false)} title={editId ? 'Edit Investment' : 'Add Investment'} size="lg">
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-4">
             <TextField label="Date" type="date" value={form.date ?? ''} onChange={f('date')} required />
             <SelectField label="Category" value={form.category ?? 'other'} onChange={f('category')} options={CATEGORY_OPTIONS} />
           </div>
           <TextField label="Description / Item" value={form.description ?? ''} onChange={f('description')} placeholder="Tyre set replacement (6 tyres)" required />
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-4">
             <TextField label="Vehicle No. (if applicable)" value={form.vehicle_no ?? ''} onChange={f('vehicle_no')} placeholder="GJ-03-AB-1234" />
             <TextField label="Amount (₹)" type="number" value={form.amount ?? ''} onChange={f('amount')} placeholder="111000" required />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-4">
             <SelectField label="Payment Mode" value={form.payment_mode ?? 'cash'} onChange={f('payment_mode')} options={PAYMENT_OPTIONS} />
             <TextField label="Paid To / Vendor" value={form.paid_to ?? ''} onChange={f('paid_to')} placeholder="MRF Tyre Depot" />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-4">
             <TextField label="Bill / Receipt No." value={form.bill_receipt_no ?? ''} onChange={f('bill_receipt_no')} placeholder="MRF/2026/0987" />
             <TextField label="Note" value={form.note ?? ''} onChange={f('note')} placeholder="Additional notes..." />
           </div>

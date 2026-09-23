@@ -42,17 +42,17 @@ export default function Modal({ open, onClose, title, children, footer, size = '
   return (
     <div
       ref={overlayRef}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto"
       onClick={(e) => { if (e.target === overlayRef.current) onClose(); }}
     >
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-ink/40" />
+      <div className="absolute inset-0 bg-ink/40" onClick={onClose} />
 
       {/* Panel */}
-      <div className={`relative w-full ${widths[size]} rounded-card border border-line bg-panel shadow-lg`}>
+      <div className={`relative w-full ${widths[size]} max-h-[100dvh] sm:max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden rounded-t-2xl sm:rounded-card border border-line bg-panel shadow-lg`}>
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-line">
-          <h2 className="text-lg font-semibold text-ink">{title}</h2>
+        <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-line">
+          <h2 className="text-base sm:text-lg font-semibold text-ink min-w-0">{title}</h2>
           <button
             onClick={onClose}
             className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-paper text-muted transition-colors duration-150"
@@ -65,13 +65,13 @@ export default function Modal({ open, onClose, title, children, footer, size = '
         </div>
 
         {/* Body */}
-        <div className="px-6 py-5 max-h-[70vh] overflow-y-auto">
+        <div className="px-4 sm:px-6 py-4 sm:py-5 overflow-y-auto">
           {children}
         </div>
 
         {/* Footer */}
         {footer && (
-          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-line">
+          <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3 px-4 sm:px-6 py-3 sm:py-4 border-t border-line">
             {footer}
           </div>
         )}

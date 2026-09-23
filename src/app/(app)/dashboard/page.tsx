@@ -70,7 +70,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       {/* Summary Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 min-[481px]:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <StatCard
           title="Total Trips"
           value={String(summary.totalTrips)}
@@ -165,7 +165,7 @@ export default function DashboardPage() {
 
       {/* Recent Trips */}
       <Card padding="none">
-        <div className="px-6 py-4 border-b border-line flex items-center justify-between">
+        <div className="px-4 sm:px-6 py-4 border-b border-line flex items-center justify-between gap-3">
           <h2 className="text-lg font-semibold text-ink">Recent Trips</h2>
           <Link href="/trips" className="text-[13px] font-medium text-primary hover:underline">
             View all →
@@ -225,21 +225,21 @@ export default function DashboardPage() {
         <Card>
           <h3 className="text-[15px] font-semibold text-ink mb-4">Payment Overview</h3>
           <div className="space-y-3">
-            <div className="flex items-center justify-between py-2 border-b border-line/50">
+            <div className="flex items-start sm:items-center justify-between gap-3 py-2 border-b border-line/50">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-positive" />
                 <span className="text-[14px] text-ink">Received</span>
               </div>
               <span className="text-[14px] font-medium text-positive">{formatCurrency(summary.receivedAmount)}</span>
             </div>
-            <div className="flex items-center justify-between py-2 border-b border-line/50">
+            <div className="flex items-start sm:items-center justify-between gap-3 py-2 border-b border-line/50">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-warning" />
                 <span className="text-[14px] text-ink">Pending</span>
               </div>
               <span className="text-[14px] font-medium text-warning">{formatCurrency(summary.pendingAmountOnly)}</span>
             </div>
-            <div className="flex items-center justify-between py-2">
+            <div className="flex items-start sm:items-center justify-between gap-3 py-2">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-negative" />
                 <span className="text-[14px] text-ink">Overdue</span>
@@ -252,19 +252,19 @@ export default function DashboardPage() {
         <Card>
           <h3 className="text-[15px] font-semibold text-ink mb-4">Expense Breakdown</h3>
           <div className="space-y-3">
-            <div className="flex items-center justify-between py-2 border-b border-line/50">
+            <div className="flex items-start sm:items-center justify-between gap-3 py-2 border-b border-line/50">
               <span className="text-[14px] text-ink">Driver Silik / Advances</span>
               <span className="text-[14px] font-medium">{formatCurrency(summary.totalSilik)}</span>
             </div>
-            <div className="flex items-center justify-between py-2 border-b border-line/50">
+            <div className="flex items-start sm:items-center justify-between gap-3 py-2 border-b border-line/50">
               <span className="text-[14px] text-ink">Diesel</span>
               <span className="text-[14px] font-medium">{formatCurrency(summary.totalDiesel)}</span>
             </div>
-            <div className="flex items-center justify-between py-2 border-b border-line/50">
+            <div className="flex items-start sm:items-center justify-between gap-3 py-2 border-b border-line/50">
               <span className="text-[14px] text-ink">Toll / FASTag</span>
               <span className="text-[14px] font-medium">{formatCurrency(summary.totalToll)}</span>
             </div>
-            <div className="flex items-center justify-between py-2">
+            <div className="flex items-start sm:items-center justify-between gap-3 py-2">
               <span className="text-[14px] text-ink font-medium">Total Expense</span>
               <span className="text-[14px] font-semibold text-negative">{formatCurrency(summary.totalExpense)}</span>
             </div>

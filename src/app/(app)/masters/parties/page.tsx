@@ -12,8 +12,10 @@ import { getParties, saveParty, togglePartyActive, syncPartiesFromSupabase, dele
 import { generateUUID } from '@/lib/supabase-service';
 import type { Party } from '@/types/database';
 import { useEffect } from 'react';
+import { useToast } from '@/components/Toast';
 
 export default function PartiesPage() {
+  const toast = useToast();
   const [parties, setParties] = useState<Party[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Party | null>(null);
@@ -68,11 +70,14 @@ export default function PartiesPage() {
     const updated = saveParty(entry);
     setParties(updated);
     setShowForm(false);
+    toast.success(editing ? 'Party updated' : 'Party added', { message: entry.name });
   };
 
   const toggleActive = (id: string) => {
     const updated = togglePartyActive(id);
     setParties(updated);
+    const party = updated.find(p => p.id === id);
+    if (party) toast.info(party.is_active ? 'Party activated' : 'Party deactivated', { message: party.name });
   };
 
   return (
@@ -83,9 +88,9 @@ export default function PartiesPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           onClear={() => setSearch('')}
-          wrapperClassName="flex-1 max-w-xs"
+          wrapperClassName="w-full sm:flex-1 sm:max-w-xs"
         />
-        <Button onClick={() => openForm()}>
+        <Button onClick={() => openForm()} className="w-full sm:w-auto">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>
           Add Party
         </Button>

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Button from '@/components/Button';
 import { useAuth } from '@/context/auth-context';
+import { useToast } from '@/components/Toast';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -14,6 +15,7 @@ export default function LoginPage() {
 
   const { user, loading: authLoading, signIn, isConfigured } = useAuth();
   const router = useRouter();
+  const toast = useToast();
 
   // Clean any old auto-remembered email so it starts completely blank
   useEffect(() => {
@@ -57,16 +59,18 @@ export default function LoginPage() {
 
       if (authError) {
         if (authError.message.toLowerCase().includes('invalid login credentials')) {
-          setError('Email ya Password galat hai. Kripya check karke dobara enter karein.');
+          setError('The email or password is incorrect. Please check and try again.');
         } else if (authError.message.toLowerCase().includes('email not confirmed')) {
-          setError('Email confirm nahi hua hai. Kripya Supabase Auth me check karein.');
+          setError('This email is not confirmed. Please confirm it in Supabase Auth.');
         } else {
           setError(authError.message);
         }
+        toast.error('Login failed', { message: 'Please check your email and password.' });
         setLoading(false);
         return;
       }
 
+      toast.success('Welcome back!', { message: 'You are logged in to Shreeji Transport.', afterReload: true });
       window.location.href = '/dashboard';
     } catch (err: any) {
       setError(err?.message || 'Login failed. Please check network connection.');
