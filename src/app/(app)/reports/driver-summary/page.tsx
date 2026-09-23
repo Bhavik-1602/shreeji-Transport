@@ -8,7 +8,9 @@ import Modal from '@/components/Modal';
 import SearchInput from '@/components/SearchInput';
 import { TextField } from '@/components/Input';
 import { formatCurrency, formatDate } from '@/lib/format';
-import { getStoredDriverSummaries, saveDriverSummary, deleteDriverSummary } from '@/lib/operations-store';
+import { getStoredDriverSummaries, saveDriverSummary, deleteDriverSummary, syncDriverSummariesFromSupabase, syncDriverSummariesFromTrips } from '@/lib/operations-store';
+import { getStoredTrips, syncTripsFromSupabase } from '@/lib/trip-store';
+import { generateUUID } from '@/lib/supabase-service';
 import type { DriverSummary } from '@/types/database';
 
 const emptyForm = (): Partial<DriverSummary> => ({
@@ -31,7 +33,33 @@ export default function DriverSummaryPage() {
   const [editId, setEditId] = useState<string | null>(null);
 
   useEffect(() => {
-    setRecords(getStoredDriverSummaries());
+    const refresh = () => {
+      const trips = getStoredTrips();
+      if (trips.length > 0) syncDriverSummariesFromTrips(trips);
+      setRecords(getStoredDriverSummaries());
+    };
+
+    refresh();
+
+    syncDriverSummariesFromSupabase().then(() => {
+      const trips = getStoredTrips();
+      if (trips.length > 0) syncDriverSummariesFromTrips(trips);
+      setRecords(getStoredDriverSummaries());
+    }).catch(() => {});
+
+    syncTripsFromSupabase().then(trips => {
+      if (trips && trips.length > 0) {
+        syncDriverSummariesFromTrips(trips);
+        setRecords(getStoredDriverSummaries());
+      }
+    }).catch(() => {});
+
+    window.addEventListener('shreeji_operations_updated', refresh);
+    window.addEventListener('shreeji_trips_updated', refresh);
+    return () => {
+      window.removeEventListener('shreeji_operations_updated', refresh);
+      window.removeEventListener('shreeji_trips_updated', refresh);
+    };
   }, []);
 
   // Distinct lists for dropdown filters
@@ -93,8 +121,8 @@ export default function DriverSummaryPage() {
   function handleSave() {
     if (!form.date || !form.vehicle_no || !form.driver_name || form.silik_amount == null) return;
     const entry: DriverSummary = {
-      id: editId ?? `ds${Date.now()}`,
-      transport_id: 't1',
+      id: editId ?? generateUUID(),
+      transport_id: 'a0000000-0000-0000-0000-000000000001',
       date: form.date,
       vehicle_no: form.vehicle_no,
       driver_name: form.driver_name,

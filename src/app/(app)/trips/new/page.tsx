@@ -19,7 +19,6 @@ import {
   getAllAccountOptions,
 } from '@/lib/master-store';
 import { saveTrip, computeUnifiedCalculations, getNextSrNumber } from '@/lib/trip-store';
-import { saveDriverSummary } from '@/lib/operations-store';
 import { formatCurrency } from '@/lib/format';
 import type { PaymentMode, PaymentStatus, Vehicle, Driver, Party, Location, BankAccount } from '@/types/database';
 
@@ -464,19 +463,7 @@ export default function NewTripPage() {
         notes: notes.trim() || null,
       });
 
-      // Record onward driver silik in operations store
-      if (driverSilik && Number(driverSilik) > 0) {
-        saveDriverSummary({
-          id: `ds_${Date.now()}_onward`,
-          transport_id: 't1',
-          date: silikDate || date,
-          vehicle_no: vehicleNo.trim(),
-          driver_name: driverName.trim(),
-          silik_amount: Number(driverSilik),
-          note: `Trip advance for ${saved.sr_number} (${loadingFrom} to ${loadingTo})`,
-          created_at: new Date().toISOString(),
-        });
-      }
+      // Diesel / Fastag / Payment / Driver Summary sync happens inside saveTrip()
 
       // 2. Save full Return Leg trip if enabled (with all return fields)
       // Note: Return leg shares the SAME parent sr_number (e.g. SR0001) and does not consume a new serial number.
@@ -510,20 +497,6 @@ export default function NewTripPage() {
           return_leg_for: saved.id,
           notes: returnNotes.trim() || `Return leg of ${saved.sr_number}`,
         });
-
-        // Record return driver silik if entered
-        if (returnDriverSilik && Number(returnDriverSilik) > 0) {
-          saveDriverSummary({
-            id: `ds_${Date.now()}_return`,
-            transport_id: 't1',
-            date: returnSilikDate || date,
-            vehicle_no: vehicleNo.trim(),
-            driver_name: (returnDriver || driverName).trim(),
-            silik_amount: Number(returnDriverSilik),
-            note: `Return leg advance for ${returnSr} (${returnFrom} to ${returnTo})`,
-            created_at: new Date().toISOString(),
-          });
-        }
       }
 
       const msg = hasReturnLeg

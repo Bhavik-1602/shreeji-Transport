@@ -9,7 +9,17 @@ import {
   deleteSupabaseTrip,
   generateUUID,
 } from './supabase-service';
-import { recordOrUpdatePaymentForTrip, removePaymentForTrip, syncPaymentsFromTrips, getStoredPayments, type Payment } from './operations-store';
+import {
+  recordOrUpdatePaymentForTrip,
+  removePaymentForTrip,
+  syncPaymentsFromTrips,
+  getStoredPayments,
+  recordOrUpdateFastagForTrip,
+  syncFastagFromTrips,
+  recordOrUpdateDriverSilikForTrip,
+  syncDriverSummariesFromTrips,
+} from './operations-store';
+import type { Payment } from '@/types/database';
 import { recordOrUpdateDieselForTrip, syncDieselFromTrips, removeDieselForTrip } from './diesel-store';
 
 export interface UnifiedTrip {
@@ -452,31 +462,53 @@ export function saveTrip(entry: Partial<UnifiedTrip> & { id?: string }): Unified
   notifyListeners();
   upsertSupabaseTrip(finalEntry).catch(() => {});
 
-  // Automatically sync received payment to operations store (payments)
-  if (finalEntry.received_amount && finalEntry.received_amount > 0) {
+  const tripRefForPayment = finalEntry.is_return_leg
+    ? `${finalEntry.sr_number} (Return)`
+    : finalEntry.sr_number;
+
+  // Sync freight / payment accounting to Payment module when freight or received is filled
+  if ((finalEntry.total_freight && finalEntry.total_freight > 0) || (finalEntry.received_amount && finalEntry.received_amount > 0)) {
     try {
-      recordOrUpdatePaymentForTrip(finalEntry.sr_number, {
+      recordOrUpdatePaymentForTrip(tripRefForPayment, {
         date: finalEntry.date,
         party_name: finalEntry.party_name,
         vehicle_no: finalEntry.vehicle_no,
         freight_amount: finalEntry.total_freight,
-        received_amount: finalEntry.received_amount,
+        received_amount: finalEntry.received_amount ?? 0,
         balance: finalEntry.balance_amount,
         payment_mode: finalEntry.payment_mode || 'Jaymin - HDFC',
         bank_account: finalEntry.payment_mode || 'Jaymin - HDFC',
-        note: finalEntry.notes || `Initial payment received on trip creation (${finalEntry.sr_number})`,
+        note: finalEntry.notes || `Freight collection for ${tripRefForPayment}`,
       });
     } catch (e) {
       console.warn('Could not sync trip payment to operations-store:', e);
     }
   }
 
-  // Automatically sync diesel details to diesel table if entered
+  // Sync diesel details to Diesel module if entered
   if ((finalEntry.diesel_litres && Number(finalEntry.diesel_litres) > 0) || (finalEntry.diesel_cost && Number(finalEntry.diesel_cost) > 0)) {
     try {
       recordOrUpdateDieselForTrip(finalEntry);
     } catch (e) {
       console.warn('Could not sync trip diesel to diesel-store:', e);
+    }
+  }
+
+  // Sync toll / Fastag / other expenses to Fastag module
+  if ((finalEntry.toll && Number(finalEntry.toll) > 0) || (finalEntry.other_expense && Number(finalEntry.other_expense) > 0)) {
+    try {
+      recordOrUpdateFastagForTrip(finalEntry);
+    } catch (e) {
+      console.warn('Could not sync trip toll/fastag to operations-store:', e);
+    }
+  }
+
+  // Sync driver silik to Driver Summary module
+  if (finalEntry.driver_silik && Number(finalEntry.driver_silik) > 0) {
+    try {
+      recordOrUpdateDriverSilikForTrip(finalEntry);
+    } catch (e) {
+      console.warn('Could not sync trip silik to driver summary:', e);
     }
   }
 
@@ -609,6 +641,16 @@ export async function syncTripsFromSupabase(): Promise<UnifiedTrip[]> {
       syncDieselFromTrips(memoryTrips);
     } catch (e) {
       console.warn('Could not sync diesel from trips:', e);
+    }
+    try {
+      syncFastagFromTrips(memoryTrips);
+    } catch (e) {
+      console.warn('Could not sync fastag from trips:', e);
+    }
+    try {
+      syncDriverSummariesFromTrips(memoryTrips);
+    } catch (e) {
+      console.warn('Could not sync driver summaries from trips:', e);
     }
     return memoryTrips;
   }
