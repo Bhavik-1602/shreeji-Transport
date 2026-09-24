@@ -155,11 +155,22 @@ export default function DieselPage() {
     setShowModal(true);
   }
 
-  function handleDelete(id: string, slipNo: string, amount: number) {
-    if (confirm(`Are you sure you want to delete Diesel Slip ${slipNo || id} (Amount: ${formatCurrency(amount)})?`)) {
-      const updated = deleteDieselEntry(id);
-      setEntries([...updated]);
-      toast.success('Diesel entry deleted', { message: `${slipNo ? `Slip ${slipNo} · ` : ''}${formatCurrency(amount)}` });
+  async function handleDelete(id: string, slipNo: string, amount: number) {
+    if (!confirm(`Are you sure you want to delete Diesel Slip ${slipNo || id} (Amount: ${formatCurrency(amount)})?`)) {
+      return;
+    }
+
+    const { entries, remoteOk } = await deleteDieselEntry(id);
+    setEntries([...entries]);
+
+    if (remoteOk) {
+      toast.success('Diesel entry deleted', {
+        message: `${slipNo ? `Slip ${slipNo} · ` : ''}${formatCurrency(amount)}`,
+      });
+    } else {
+      toast.warning('Removed from this device', {
+        message: 'Cloud delete may have failed. The entry will stay hidden here.',
+      });
     }
   }
 

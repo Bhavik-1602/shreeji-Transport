@@ -8,7 +8,9 @@ import {
 } from './supabase-service';
 
 const STORAGE_KEY = 'shreeji_transport_diesel_v1';
+const DELETED_IDS_KEY = 'shreeji_transport_diesel_deleted_v1';
 
+/** Demo slips from an old Excel import. Kept for reference only — never auto-seeded again. */
 export const initialDieselEntries: DieselEntry[] = [
   {
     id: '30000000-0000-0000-0000-000000000001',
@@ -90,21 +92,49 @@ export const initialDieselEntries: DieselEntry[] = [
   },
 ];
 
+function getDeletedDieselIds(): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem(DELETED_IDS_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function rememberDeletedDieselId(id: string): void {
+  if (typeof window === 'undefined' || !id) return;
+  try {
+    const ids = getDeletedDieselIds();
+    ids.add(id);
+    localStorage.setItem(DELETED_IDS_KEY, JSON.stringify([...ids]));
+  } catch {}
+}
+
+function filterOutDeleted(entries: DieselEntry[]): DieselEntry[] {
+  const deleted = getDeletedDieselIds();
+  if (deleted.size === 0) return entries;
+  return entries.filter(e => !e.id || !deleted.has(e.id));
+}
+
 export function getStoredDiesel(): DieselEntry[] {
   if (typeof window !== 'undefined') {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw !== null) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed)) return filterOutDeleted(parsed);
       }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(initialDieselEntries));
-      return initialDieselEntries;
+      // Do not re-seed demo slips (117/122/134/148/157/169). Start empty.
+      localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
+      return [];
     } catch {
-      return initialDieselEntries;
+      return [];
     }
   }
-  return initialDieselEntries;
+  return [];
 }
 
 export function saveDieselEntry(entry: Partial<DieselEntry> & { id?: string }): DieselEntry[] {
@@ -147,6 +177,12 @@ export function saveDieselEntry(entry: Partial<DieselEntry> & { id?: string }): 
 
   if (typeof window !== 'undefined') {
     try {
+      // If user re-adds a previously deleted id, allow it again.
+      const deleted = getDeletedDieselIds();
+      if (deleted.has(id)) {
+        deleted.delete(id);
+        localStorage.setItem(DELETED_IDS_KEY, JSON.stringify([...deleted]));
+      }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
       window.dispatchEvent(new Event('shreeji_diesel_updated'));
     } catch {}
@@ -156,9 +192,12 @@ export function saveDieselEntry(entry: Partial<DieselEntry> & { id?: string }): 
   return updated;
 }
 
-export function deleteDieselEntry(id: string): DieselEntry[] {
+export async function deleteDieselEntry(id: string): Promise<{ entries: DieselEntry[]; remoteOk: boolean }> {
   const list = getStoredDiesel();
   const updated = list.filter(item => item.id !== id);
+
+  // Remember deletion so a slow/failed Supabase sync cannot bring the row back.
+  rememberDeletedDieselId(id);
 
   if (typeof window !== 'undefined') {
     try {
@@ -167,17 +206,27 @@ export function deleteDieselEntry(id: string): DieselEntry[] {
     } catch {}
   }
 
-  deleteSupabaseDiesel(id).catch(() => {});
-  return updated;
+  const remoteOk = await deleteSupabaseDiesel(id);
+  return { entries: updated, remoteOk };
 }
 
 export async function syncDieselFromSupabase(): Promise<DieselEntry[]> {
   const remote = await fetchSupabaseDiesel();
   if (remote !== null && remote.length > 0) {
+    const deleted = getDeletedDieselIds();
+    // Drop rows the user already deleted (and try again to remove them remotely).
+    const remoteKept = remote.filter(r => {
+      if (r.id && deleted.has(r.id)) {
+        deleteSupabaseDiesel(r.id).catch(() => {});
+        return false;
+      }
+      return true;
+    });
+
     const local = getStoredDiesel();
-    const remoteIds = new Set(remote.map(r => r.id));
-    const localOnly = local.filter(l => !remoteIds.has(l.id));
-    const merged = [...remote, ...localOnly];
+    const remoteIds = new Set(remoteKept.map(r => r.id));
+    const localOnly = local.filter(l => !remoteIds.has(l.id) && !(l.id && deleted.has(l.id)));
+    const merged = filterOutDeleted([...remoteKept, ...localOnly]);
 
     if (typeof window !== 'undefined') {
       try {
