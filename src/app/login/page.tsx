@@ -82,9 +82,12 @@ export default function LoginPage() {
     return (
       <div className="min-h-screen bg-paper flex items-center justify-center p-4">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-12 h-12 rounded-xl bg-[#0F6B4F] shadow-md flex items-center justify-center animate-pulse">
-            <span className="text-[#F97316] font-bold text-xl">श्री</span>
-          </div>
+          <img
+            src="/shreeji-logo.png"
+            alt="શ્રીજી ટ્રાન્સપોર્ટ"
+            className="h-12 w-auto max-w-[200px] object-contain animate-pulse"
+            draggable={false}
+          />
           <p className="text-[14px] text-muted font-medium">Checking session...</p>
         </div>
       </div>
@@ -96,10 +99,12 @@ export default function LoginPage() {
       <div className="w-full max-w-[420px]">
         {/* Brand Header */}
         <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[#0F6B4F] shadow-sm mb-3">
-            <span className="text-[#F97316] font-bold text-2xl font-serif">श्री</span>
-          </div>
-          <h1 className="text-2xl font-bold text-ink tracking-tight">Shreeji Transport</h1>
+          <img
+            src="/shreeji-logo.png"
+            alt="શ્રીજી ટ્રાન્સપોર્ટ"
+            className="mx-auto h-20 w-auto max-w-[300px] object-contain mb-3"
+            draggable={false}
+          />
           <p className="text-[14px] text-muted mt-1">Sign in to your ERP account</p>
         </div>
 

@@ -30,9 +30,12 @@ function LoadingScreen({ message }: { message: string }) {
   return (
     <div className="flex h-screen items-center justify-center bg-paper">
       <div className="flex flex-col items-center gap-3">
-        <div className="w-12 h-12 rounded-2xl bg-[#F97316] flex items-center justify-center animate-pulse">
-          <span className="text-white font-bold text-xl">श्री</span>
-        </div>
+        <img
+          src="/shreeji-logo.png"
+          alt="શ્રીજી ટ્રાન્સપોર્ટ"
+          className="h-12 w-auto max-w-[200px] object-contain animate-pulse"
+          draggable={false}
+        />
         <p className="text-[14px] text-muted font-medium">{message}</p>
       </div>
     </div>

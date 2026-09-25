@@ -184,17 +184,17 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
         )}
       >
         {/* Logo */}
-        <div className="flex items-center gap-3 px-5 h-[60px] border-b border-line flex-shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-[#F97316] flex items-center justify-center flex-shrink-0">
-            <span className="text-white font-bold text-sm">श्री</span>
-          </div>
-          <div className="min-w-0">
-            <h1 className="text-[15px] font-semibold text-ink truncate">Shreeji Transport</h1>
-          </div>
+        <div className="relative flex items-center justify-center px-4 h-[60px] border-b border-line flex-shrink-0">
+          <img
+            src="/shreeji-logo.png"
+            alt="શ્રીજી ટ્રાન્સપોર્ટ"
+            className="h-11 w-auto max-w-[180px] object-contain"
+            draggable={false}
+          />
           {/* Mobile close */}
           <button
             onClick={onClose}
-            className="ml-auto w-8 h-8 flex items-center justify-center rounded-lg hover:bg-paper text-muted lg:hidden"
+            className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-paper text-muted lg:hidden flex-shrink-0"
             aria-label="Close sidebar"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
