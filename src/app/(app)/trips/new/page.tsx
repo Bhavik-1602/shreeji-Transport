@@ -19,6 +19,7 @@ import {
   getAllAccountOptions,
 } from '@/lib/master-store';
 import { saveTrip, deleteTrip, computeUnifiedCalculations, getNextSrNumber, getStoredTrips, syncTripsFromSupabase, type UnifiedTrip } from '@/lib/trip-store';
+import { downloadTripVoucherPdf, getTripVoucherPdfBlob } from '@/lib/trip-voucher-pdf';
 import { formatCurrency } from '@/lib/format';
 import type { PaymentMode, PaymentStatus, Vehicle, Driver, Party, Location, BankAccount } from '@/types/database';
 import { useToast } from '@/components/Toast';
@@ -215,7 +216,10 @@ export default function NewTripPage() {
   const [formErrorBanner, setFormErrorBanner] = useState<string | null>(null);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [viewMode, setViewMode] = useState(false);
+  const [viewMode, setViewMode] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return new URLSearchParams(window.location.search).get('view') === '1';
+  });
   const [editId, setEditId] = useState<string | null>(null);
   const [returnEditId, setReturnEditId] = useState<string | null>(null);
   const [createdAt, setCreatedAt] = useState<string | null>(null);
@@ -542,6 +546,117 @@ export default function NewTripPage() {
     return true;
   };
 
+  const buildVoucherTrips = (): Array<Partial<UnifiedTrip> & { legLabel?: string }> => {
+    const vouchers: Array<Partial<UnifiedTrip> & { legLabel?: string }> = [
+      {
+        sr_number: autoSrNumber || '—',
+        date,
+        vehicle_no: vehicleNo,
+        driver_name: driverName,
+        loading_from: loadingFrom,
+        loading_to: loadingTo,
+        ton: ton ? Number(ton) : null,
+        rate_per_ton: ratePerTon ? Number(ratePerTon) : null,
+        total_freight: computedFreight,
+        diesel_cost: computed.diesel_cost,
+        diesel_litres: dieselLitres ? Number(dieselLitres) : null,
+        diesel_rate: dieselRate ? Number(dieselRate) : null,
+        toll: toll ? Number(toll) : null,
+        other_expense: otherExpense ? Number(otherExpense) : null,
+        driver_silik: driverSilik ? Number(driverSilik) : null,
+        legLabel: hasReturnLeg ? 'Onward' : undefined,
+      },
+    ];
+
+    if (hasReturnLeg && returnFrom && returnTo) {
+      vouchers.push({
+        sr_number: autoSrNumber || '—',
+        date: returnDate || date,
+        vehicle_no: vehicleNo,
+        driver_name: returnDriver || driverName,
+        loading_from: returnFrom,
+        loading_to: returnTo,
+        ton: returnTon ? Number(returnTon) : null,
+        rate_per_ton: returnRate ? Number(returnRate) : null,
+        total_freight: computedReturnFreight,
+        diesel_cost: returnComputed.diesel_cost,
+        diesel_litres: returnDieselLitres ? Number(returnDieselLitres) : null,
+        diesel_rate: returnDieselRate ? Number(returnDieselRate) : null,
+        toll: returnToll ? Number(returnToll) : null,
+        other_expense: returnOtherExpense ? Number(returnOtherExpense) : null,
+        driver_silik: returnDriverSilik ? Number(returnDriverSilik) : null,
+        legLabel: 'Return',
+      });
+    }
+
+    return vouchers;
+  };
+
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!viewMode || !editId) {
+      setPdfPreviewUrl(null);
+      return;
+    }
+
+    try {
+      const blob = getTripVoucherPdfBlob(buildVoucherTrips());
+      const url = URL.createObjectURL(blob);
+      setPdfPreviewUrl(url);
+      return () => URL.revokeObjectURL(url);
+    } catch {
+      setPdfPreviewUrl(null);
+    }
+    // Rebuild preview when trip fields used in the voucher change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    viewMode,
+    editId,
+    autoSrNumber,
+    date,
+    vehicleNo,
+    driverName,
+    loadingFrom,
+    loadingTo,
+    ton,
+    ratePerTon,
+    computedFreight,
+    computed.diesel_cost,
+    dieselLitres,
+    dieselRate,
+    toll,
+    otherExpense,
+    driverSilik,
+    hasReturnLeg,
+    returnFrom,
+    returnTo,
+    returnDate,
+    returnDriver,
+    returnTon,
+    returnRate,
+    computedReturnFreight,
+    returnComputed.diesel_cost,
+    returnDieselLitres,
+    returnDieselRate,
+    returnToll,
+    returnOtherExpense,
+    returnDriverSilik,
+  ]);
+
+  const handleDownloadVoucherPdf = () => {
+    try {
+      downloadTripVoucherPdf(buildVoucherTrips());
+      toast.success('Voucher PDF downloaded', {
+        message: hasReturnLeg
+          ? `Trip ${autoSrNumber} — onward and return`
+          : `Trip ${autoSrNumber}`,
+      });
+    } catch {
+      toast.error('PDF could not be created', { message: 'Please try again.' });
+    }
+  };
+
   const handleSave = async () => {
     if (viewMode) return;
     if (!validate()) return;
@@ -647,23 +762,71 @@ export default function NewTripPage() {
     }
   };
 
+  if (viewMode) {
+    return (
+      <div className="max-w-5xl mx-auto space-y-4 pb-12">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold text-ink">Trip Voucher</h1>
+            <p className="text-[13px] text-muted mt-0.5">
+              {autoSrNumber ? `PDF preview for trip ${autoSrNumber}` : 'Loading voucher PDF...'}
+              {hasReturnLeg ? ' (onward + return)' : ''}
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <Button
+              variant="primary"
+              onClick={handleDownloadVoucherPdf}
+              disabled={!pdfPreviewUrl}
+              className="w-full sm:w-auto gap-2"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <path d="M14 2v6h6M12 18v-6M9 15l3 3 3-3" />
+              </svg>
+              Download PDF
+            </Button>
+            <Button variant="secondary" onClick={() => router.push('/trips')} className="w-full sm:w-auto">
+              Back
+            </Button>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-line bg-panel overflow-hidden shadow-sm">
+          {pdfPreviewUrl ? (
+            <iframe
+              title={`Trip voucher ${autoSrNumber || ''}`}
+              src={pdfPreviewUrl}
+              className="w-full bg-paper"
+              style={{ height: 'min(80vh, 920px)', minHeight: '560px' }}
+            />
+          ) : (
+            <div className="flex items-center justify-center py-24 text-[14px] text-muted">
+              Preparing PDF voucher...
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-12">
       {/* Page Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-xl font-bold text-ink">{viewMode ? 'View Trip' : editId ? 'Edit Trip' : 'Add Trip'}</h1>
+          <h1 className="text-xl font-bold text-ink">{editId ? 'Edit Trip' : 'Add Trip'}</h1>
           <p className="text-[13px] text-muted mt-0.5">
-            {viewMode
-              ? 'Saved trip details. Fields are locked.'
-              : editId
-                ? 'Update this trip. The same SR number is kept.'
-                : 'Record complete trip and round-trip return details with accounting.'}
+            {editId
+              ? 'Update this trip. The same SR number is kept.'
+              : 'Record complete trip and round-trip return details with accounting.'}
           </p>
         </div>
-        <Button variant="secondary" onClick={() => router.push('/trips')} className="w-full sm:w-auto">
-          {viewMode ? 'Back' : 'Cancel'}
-        </Button>
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+          <Button variant="secondary" onClick={() => router.push('/trips')} className="w-full sm:w-auto">
+            Cancel
+          </Button>
+        </div>
       </div>
 
       {/* Validation Error Banner Top */}
@@ -1633,17 +1796,15 @@ export default function NewTripPage() {
       {/* Save Action Buttons */}
       <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3 pt-2">
         <Button variant="secondary" onClick={() => router.push('/trips')} className="w-full sm:w-auto">
-          {viewMode ? 'Back' : 'Cancel'}
+          Cancel
         </Button>
-        {!viewMode && (
-          <Button onClick={handleSave} loading={saving} size="lg" className="w-full sm:w-auto">
-            {saving
-              ? 'Saving Trip...'
-              : editId
-                ? (hasReturnLeg ? 'Update Round Trip (Onward + Return)' : 'Update Trip')
-                : (hasReturnLeg ? 'Save Round Trip (Onward + Return)' : 'Save Trip')}
-          </Button>
-        )}
+        <Button onClick={handleSave} loading={saving} size="lg" className="w-full sm:w-auto">
+          {saving
+            ? 'Saving Trip...'
+            : editId
+              ? (hasReturnLeg ? 'Update Round Trip (Onward + Return)' : 'Update Trip')
+              : (hasReturnLeg ? 'Save Round Trip (Onward + Return)' : 'Save Trip')}
+        </Button>
       </div>
 
       {/* Autocomplete Datalists for Location & Party suggestions */}
