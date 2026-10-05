@@ -5,10 +5,13 @@ import Link from 'next/link';
 import Card, { StatCard } from '@/components/Card';
 import StatusPill from '@/components/StatusPill';
 import { getStoredTrips, subscribeTrips, syncTripsFromSupabase, type UnifiedTrip } from '@/lib/trip-store';
+import { getStoredMaintenance, syncMaintenanceFromSupabase } from '@/lib/operations-store';
 import { formatCurrency, formatDate } from '@/lib/format';
 
 export default function DashboardPage() {
   const [trips, setTrips] = useState<UnifiedTrip[]>([]);
+  const [maintenanceTotal, setMaintenanceTotal] = useState(0);
+  const [maintenanceCount, setMaintenanceCount] = useState(0);
 
   useEffect(() => {
     setTrips(getStoredTrips());
@@ -17,6 +20,23 @@ export default function DashboardPage() {
     });
     return subscribeTrips((updated) => setTrips([...updated]));
   }, []);
+
+  useEffect(() => {
+    const apply = (list: { amount?: number | string | null }[]) => {
+      setMaintenanceTotal(list.reduce((s, m) => s + (Number(m.amount) || 0), 0));
+      setMaintenanceCount(list.length);
+    };
+    const refresh = () => apply(getStoredMaintenance());
+    refresh();
+    syncMaintenanceFromSupabase().then(apply).catch(() => {});
+    window.addEventListener('shreeji_operations_updated', refresh);
+    return () => window.removeEventListener('shreeji_operations_updated', refresh);
+  }, []);
+
+  const finalProfit = useMemo(() => {
+    const tripProfit = trips.reduce((s, t) => s + (t.profit ?? 0), 0);
+    return tripProfit - maintenanceTotal;
+  }, [trips, maintenanceTotal]);
 
   const summary = useMemo(() => {
     const totalTrips = trips.length;
@@ -108,13 +128,50 @@ export default function DashboardPage() {
           }
         />
         <StatCard
-          title="Net Profit"
+          title="Trip Profit"
           value={formatCurrency(summary.totalProfit)}
-          subtitle="All trips combined"
+          subtitle="Freight − trip expenses"
           color={summary.totalProfit >= 0 ? 'positive' : 'negative'}
           icon={
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M2 16l4-4 3 3 4-6 5 5" /><path d="M15 8h3v3" />
+            </svg>
+          }
+        />
+      </div>
+
+      {/* Expense, Maintenance & Final Profit */}
+      <div className="grid grid-cols-1 min-[481px]:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+        <StatCard
+          title="Trip Expense"
+          value={formatCurrency(summary.totalExpense)}
+          subtitle="Diesel, toll, silik & other"
+          color="negative"
+          icon={
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="4" width="16" height="12" rx="2" /><path d="M2 8h16" /><path d="M6 12h3" />
+            </svg>
+          }
+        />
+        <StatCard
+          title="Maintenance"
+          value={formatCurrency(maintenanceTotal)}
+          subtitle={`${maintenanceCount} maintenance entries`}
+          color="warning"
+          icon={
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12.5 3.5a4 4 0 0 0-5 5L3 13l4 4 4.5-4.5a4 4 0 0 0 5-5l-2.5 2.5-2.5-.5-.5-2.5 2.5-2.5z" />
+            </svg>
+          }
+        />
+        <StatCard
+          title="Net Profit"
+          value={formatCurrency(finalProfit)}
+          subtitle="Trip profit − maintenance"
+          color={finalProfit >= 0 ? 'positive' : 'negative'}
+          icon={
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="10" cy="10" r="8" /><path d="M10 5v10" /><path d="M13 7.5c0-1-1.3-1.8-3-1.8s-3 .8-3 1.8 1.3 1.7 3 2 3 1 3 2-1.3 1.8-3 1.8-3-.8-3-1.8" />
             </svg>
           }
         />
@@ -264,9 +321,21 @@ export default function DashboardPage() {
               <span className="text-[14px] text-ink">Toll / FASTag</span>
               <span className="text-[14px] font-medium">{formatCurrency(summary.totalToll)}</span>
             </div>
-            <div className="flex items-start sm:items-center justify-between gap-3 py-2">
-              <span className="text-[14px] text-ink font-medium">Total Expense</span>
+            <div className="flex items-start sm:items-center justify-between gap-3 py-2 border-b border-line/50">
+              <span className="text-[14px] text-ink font-medium">Total Trip Expense</span>
               <span className="text-[14px] font-semibold text-negative">{formatCurrency(summary.totalExpense)}</span>
+            </div>
+            <div className="flex items-start sm:items-center justify-between gap-3 py-2 border-b border-line/50">
+              <span className="text-[14px] text-ink">Maintenance</span>
+              <span className="text-[14px] font-medium text-warning">{formatCurrency(maintenanceTotal)}</span>
+            </div>
+            <div className="flex items-start sm:items-center justify-between gap-3 py-2 border-b border-line/50">
+              <span className="text-[14px] text-ink">Trip Profit</span>
+              <span className={`text-[14px] font-medium ${summary.totalProfit >= 0 ? 'text-positive' : 'text-negative'}`}>{formatCurrency(summary.totalProfit)}</span>
+            </div>
+            <div className="flex items-start sm:items-center justify-between gap-3 py-2">
+              <span className="text-[14px] text-ink font-semibold">Net Profit (after maintenance)</span>
+              <span className={`text-[15px] font-bold ${finalProfit >= 0 ? 'text-positive' : 'text-negative'}`}>{formatCurrency(finalProfit)}</span>
             </div>
           </div>
         </Card>
